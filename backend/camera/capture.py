@@ -14,6 +14,7 @@ class CameraCapture:
     def __init__(self, camera_id: int, device_index: int):
         self.camera_id = camera_id
         self.device_index = device_index
+        self.device_path = f"/dev/video{device_index}"
         self._cap: Optional[cv2.VideoCapture] = None
         self._frame: Optional[Frame] = None
         self._lock = threading.Lock()

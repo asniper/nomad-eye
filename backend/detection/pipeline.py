@@ -15,13 +15,14 @@ cfg = get_settings()
 
 class DetectionPipeline:
     def __init__(self, cameras: list[CameraCapture]):
-        self._cameras = cameras
+        self._cameras = list(cameras)
         self._detectors = {cam.camera_id: MotionDetector() for cam in cameras}
         self._object_detector = ObjectDetector()
         self._running = False
         self._threads: list[threading.Thread] = []
         self._latest_detections: dict = {}
         self._overlay_enabled: dict = {cam.camera_id: True for cam in cameras}
+        self._lock = threading.Lock()
 
     def start(self):
         self._running = True
@@ -35,6 +36,28 @@ class DetectionPipeline:
 
     def set_overlay(self, camera_id: int, enabled: bool):
         self._overlay_enabled[camera_id] = enabled
+
+    def refresh(self, new_captures: list[CameraCapture]):
+        """Remove dead cameras and add newly discovered ones. Thread-safe."""
+        with self._lock:
+            # Prune cameras that are no longer alive (unplugged)
+            dead = [c for c in self._cameras if not c.is_alive()]
+            for c in dead:
+                c.stop()
+                self._cameras.remove(c)
+                self._detectors.pop(c.camera_id, None)
+                self._latest_detections.pop(c.camera_id, None)
+                self._overlay_enabled.pop(c.camera_id, None)
+
+            # Add newly found cameras
+            for cap in new_captures:
+                self._cameras.append(cap)
+                self._detectors[cap.camera_id] = MotionDetector()
+                self._overlay_enabled[cap.camera_id] = True
+                if self._running:
+                    t = threading.Thread(target=self._run_camera, args=(cap,), daemon=True)
+                    t.start()
+                    self._threads.append(t)
 
     def get_latest(self, camera_id: int):
         return self._latest_detections.get(camera_id)

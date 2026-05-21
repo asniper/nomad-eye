@@ -14,6 +14,7 @@ export const auth = {
 
 export const cameras = {
   list: () => api.get('/cameras/'),
+  refresh: () => api.post('/cameras/refresh'),
   toggleOverlay: (id, enabled) => api.post(`/cameras/${id}/overlay?enabled=${enabled}`),
 }
 
