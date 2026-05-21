@@ -99,6 +99,19 @@ export default function Network() {
     }
   }
 
+  const connectSaved = async (ssid) => {
+    if (connecting) return
+    setConnecting(true)
+    setConnectMsg({ ok: null, text: `Connecting to ${ssid}…` })
+    try {
+      await network.connectSaved(ssid)
+      startPolling(ssid)
+    } catch {
+      setConnecting(false)
+      setConnectMsg({ ok: false, text: 'Connection request failed.' })
+    }
+  }
+
   const cancelConnect = () => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
     setConnecting(false)
@@ -174,20 +187,31 @@ export default function Network() {
       <Card title="Known Networks">
         {known.length === 0 && <p className="text-gray-500 text-sm">No saved networks.</p>}
         <div className="divide-y divide-gray-800">
-          {known.map((n, i) => (
-            <div key={i} className="flex items-center justify-between py-2.5">
-              <div className="flex items-center gap-3">
-                {WIFI_ICON}
-                <div>
+          {known.map((n, i) => {
+            const isCurrent = netStatus?.ssid === n.ssid
+            return (
+              <div key={i} className="flex items-center justify-between py-2.5">
+                <div className="flex items-center gap-3">
+                  {WIFI_ICON}
                   <p className="text-sm font-medium text-white">{n.ssid}</p>
-                  {n.last_connected && (
-                    <p className="text-xs text-gray-500">Last: {new Date(n.last_connected).toLocaleDateString()}</p>
-                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {isCurrent
+                    ? <Badge label="Current" color="green" />
+                    : (
+                      <button
+                        onClick={() => connectSaved(n.ssid)}
+                        disabled={connecting}
+                        className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40 transition-colors"
+                      >
+                        Connect
+                      </button>
+                    )
+                  }
                 </div>
               </div>
-              {netStatus?.ssid === n.ssid && <Badge label="Current" color="green" />}
-            </div>
-          ))}
+            )
+          })}
         </div>
       </Card>
 
@@ -272,16 +296,25 @@ export default function Network() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {netStatus?.ssid === n.ssid && <Badge label="Current" color="green" />}
-                  {n.saved && netStatus?.ssid !== n.ssid && <Badge label="Saved" color="blue" />}
-                  {!n.saved && !connecting && (
-                    <button
-                      onClick={() => { setConnectTarget(n.ssid); setConnectMsg(null) }}
-                      className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
-                    >
-                      Connect
-                    </button>
-                  )}
+                  {netStatus?.ssid === n.ssid
+                    ? <Badge label="Current" color="green" />
+                    : (
+                      <button
+                        disabled={connecting}
+                        onClick={() => {
+                          setConnectMsg(null)
+                          if (n.saved) {
+                            connectSaved(n.ssid)
+                          } else {
+                            setConnectTarget(n.ssid)
+                          }
+                        }}
+                        className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40 transition-colors"
+                      >
+                        {n.saved ? 'Switch' : 'Connect'}
+                      </button>
+                    )
+                  }
                 </div>
               </div>
             ))}

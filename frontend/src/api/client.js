@@ -37,6 +37,7 @@ export const network = {
   known: () => api.get('/network/known'),
   scan: () => api.get('/network/scan'),
   connect: (ssid, password) => api.post('/network/connect', { ssid, password }),
+  connectSaved: (ssid) => api.post('/network/connect-saved', { ssid }),
   add: (ssid, password) => api.post('/network/add', { ssid, password }),
   apStart: () => api.post('/network/ap/start'),
   apStop: () => api.post('/network/ap/stop'),

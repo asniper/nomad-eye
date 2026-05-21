@@ -61,6 +61,18 @@ def save_network(ssid: str, password: str):
     db.close()
 
 
+def connect_saved_network(ssid: str) -> bool:
+    """Re-activate a NetworkManager connection profile that already has credentials."""
+    try:
+        result = subprocess.run(
+            ["/usr/bin/nmcli", "con", "up", ssid],
+            capture_output=True, text=True, timeout=45
+        )
+        return "successfully activated" in result.stdout or "Connection successfully activated" in result.stdout
+    except subprocess.TimeoutExpired:
+        return False
+
+
 def connect_to_network(ssid: str, password: str) -> bool:
     try:
         result = subprocess.run(

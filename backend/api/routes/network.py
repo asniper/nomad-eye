@@ -2,7 +2,7 @@ import asyncio
 from fastapi import APIRouter, Depends, BackgroundTasks
 from pydantic import BaseModel
 from networking.manager import (
-    get_known_networks, connect_to_network, save_network,
+    get_known_networks, connect_to_network, connect_saved_network, save_network,
     start_access_point, stop_access_point, get_current_ip, is_connected, nmcli,
     _terse_split
 )
@@ -14,6 +14,10 @@ router = APIRouter()
 class ConnectRequest(BaseModel):
     ssid: str
     password: str
+
+
+class SavedConnectRequest(BaseModel):
+    ssid: str
 
 
 class AddNetworkRequest(BaseModel):
@@ -61,6 +65,13 @@ async def connect(body: ConnectRequest, background_tasks: BackgroundTasks, _=Dep
     """Kick off a WiFi connection attempt and return immediately.
     The client should poll GET /api/network/ to detect when it connects."""
     background_tasks.add_task(connect_to_network, body.ssid, body.password)
+    return {"status": "connecting", "ssid": body.ssid}
+
+
+@router.post("/connect-saved")
+async def connect_saved(body: SavedConnectRequest, background_tasks: BackgroundTasks, _=Depends(require_auth)):
+    """Re-activate a saved NetworkManager profile (no password needed)."""
+    background_tasks.add_task(connect_saved_network, body.ssid)
     return {"status": "connecting", "ssid": body.ssid}
 
 
