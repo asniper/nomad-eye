@@ -16,12 +16,14 @@ async def send_email(to: str, subject: str, body: str, image_path: str = None):
         return
     smtp_host = smtp_host["value"]
     smtp_port = int(db.execute("SELECT value FROM app_config WHERE key = ?", ("smtp_port",)).fetchone()["value"])
-    smtp_user = db.execute("SELECT value FROM app_config WHERE key = ?", ("smtp_user",)).fetchone()["value"]
-    smtp_pass = db.execute("SELECT value FROM app_config WHERE key = ?", ("smtp_pass",)).fetchone()["value"]
+    smtp_user = db.execute("SELECT value FROM app_config WHERE key = ?", ("smtp_username",)).fetchone()["value"]
+    smtp_pass = db.execute("SELECT value FROM app_config WHERE key = ?", ("smtp_password",)).fetchone()["value"]
+    smtp_from_row = db.execute("SELECT value FROM app_config WHERE key = ?", ("smtp_from",)).fetchone()
+    smtp_from = smtp_from_row["value"] if smtp_from_row else smtp_user
     db.close()
 
     msg = MIMEMultipart()
-    msg["From"] = smtp_user
+    msg["From"] = smtp_from
     msg["To"] = to
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
@@ -35,4 +37,4 @@ async def send_email(to: str, subject: str, body: str, image_path: str = None):
     with smtplib.SMTP(smtp_host, smtp_port) as server:
         server.starttls()
         server.login(smtp_user, smtp_pass)
-        server.sendmail(smtp_user, to, msg.as_string())
+        server.sendmail(smtp_from, to, msg.as_string())

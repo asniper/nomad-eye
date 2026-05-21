@@ -40,9 +40,9 @@ def init_db():
         CREATE TABLE IF NOT EXISTS notification_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             contact_id INTEGER NOT NULL,
-            category TEXT,
-            label TEXT,
-            status_filter TEXT,
+            categories TEXT,
+            labels TEXT,
+            device_statuses TEXT,
             time_start TEXT,
             time_end TEXT,
             active INTEGER DEFAULT 1,
@@ -63,6 +63,11 @@ def init_db():
         );
 
         INSERT OR IGNORE INTO device_status (id, status) VALUES (1, 'home');
+
+        CREATE TABLE IF NOT EXISTS app_config (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
     """)
     db.commit()
     db.close()
