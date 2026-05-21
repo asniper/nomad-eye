@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     db_path: str = str(BASE_DIR / "data" / "db" / "nomadeye.db")
     images_dir: str = str(BASE_DIR / "data" / "images")
     clips_dir: str = str(BASE_DIR / "data" / "clips")
-detection_confidence: float = 0.5
+    detection_confidence: float = 0.5
     motion_threshold: int = 500
     clip_seconds_before: int = 5
     clip_seconds_after: int = 5
