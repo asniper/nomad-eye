@@ -28,11 +28,14 @@ def save_network(ssid: str, password: str):
     db.close()
 
 def connect_to_network(ssid: str, password: str) -> bool:
-    result = subprocess.run(
-        ["/usr/bin/nmcli", "dev", "wifi", "connect", ssid, "password", password],
-        capture_output=True, text=True
-    )
-    success = "successfully activated" in result.stdout
+    try:
+        result = subprocess.run(
+            ["/usr/bin/nmcli", "dev", "wifi", "connect", ssid, "password", password],
+            capture_output=True, text=True, timeout=45
+        )
+        success = "successfully activated" in result.stdout
+    except subprocess.TimeoutExpired:
+        success = False
     if success:
         save_network(ssid, password)
     return success
