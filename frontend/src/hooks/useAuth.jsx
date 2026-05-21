@@ -1,10 +1,18 @@
-import { useState } from 'react'
+import { createContext, useContext, useState } from 'react'
 import axios from 'axios'
 
 const AUTH_KEY = 'nomadeye_auth'
+const AuthContext = createContext(null)
 
-export function useAuth() {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem(AUTH_KEY))
+export function AuthProvider({ children }) {
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    const stored = localStorage.getItem(AUTH_KEY)
+    if (stored) {
+      axios.defaults.headers.common['Authorization'] = `Basic ${stored}`
+      return true
+    }
+    return false
+  })
 
   const login = async (username, password) => {
     const res = await axios.post('/api/auth/login', { username, password })
@@ -24,10 +32,13 @@ export function useAuth() {
     setIsAuthenticated(false)
   }
 
-  const stored = localStorage.getItem(AUTH_KEY)
-  if (stored && !axios.defaults.headers.common['Authorization']) {
-    axios.defaults.headers.common['Authorization'] = `Basic ${stored}`
-  }
+  return (
+    <AuthContext.Provider value={{ isAuthenticated, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
 
-  return { isAuthenticated, login, logout }
+export function useAuth() {
+  return useContext(AuthContext)
 }
