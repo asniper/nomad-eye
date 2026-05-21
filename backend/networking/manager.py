@@ -7,7 +7,7 @@ from config.settings import get_settings
 cfg = get_settings()
 
 def nmcli(*args) -> str:
-    result = subprocess.run(["nmcli"] + list(args), capture_output=True, text=True)
+    result = subprocess.run(["/usr/bin/nmcli"] + list(args), capture_output=True, text=True)
     return result.stdout.strip()
 
 def get_known_networks() -> list:
@@ -29,7 +29,7 @@ def save_network(ssid: str, password: str):
 
 def connect_to_network(ssid: str, password: str) -> bool:
     result = subprocess.run(
-        ["nmcli", "dev", "wifi", "connect", ssid, "password", password],
+        ["/usr/bin/nmcli", "dev", "wifi", "connect", ssid, "password", password],
         capture_output=True, text=True
     )
     success = "successfully activated" in result.stdout
@@ -38,25 +38,26 @@ def connect_to_network(ssid: str, password: str) -> bool:
     return success
 
 def start_access_point():
-    subprocess.run(["nmcli", "con", "add", "type", "wifi", "ifname", "wlan0",
+    subprocess.run(["/usr/bin/nmcli", "con", "add", "type", "wifi", "ifname", "wlan0",
                     "con-name", "NomadEye-AP", "autoconnect", "no",
                     "ssid", cfg.ap_ssid], capture_output=True)
-    subprocess.run(["nmcli", "con", "modify", "NomadEye-AP",
+    subprocess.run(["/usr/bin/nmcli", "con", "modify", "NomadEye-AP",
                     "802-11-wireless.mode", "ap",
                     "802-11-wireless-security.key-mgmt", "wpa-psk",
                     "802-11-wireless-security.psk", cfg.ap_password,
                     "ipv4.method", "shared"], capture_output=True)
-    subprocess.run(["nmcli", "con", "up", "NomadEye-AP"], capture_output=True)
+    subprocess.run(["/usr/bin/nmcli", "con", "up", "NomadEye-AP"], capture_output=True)
 
 def stop_access_point():
-    subprocess.run(["nmcli", "con", "down", "NomadEye-AP"], capture_output=True)
+    subprocess.run(["/usr/bin/nmcli", "con", "down", "NomadEye-AP"], capture_output=True)
 
 def get_current_ip() -> str:
-    result = subprocess.run(["hostname", "-I"], capture_output=True, text=True)
-    return result.stdout.strip().split()[0] if result.stdout.strip() else ""
+    result = subprocess.run(["/usr/bin/hostname", "-I"], capture_output=True, text=True)
+    parts = result.stdout.strip().split()
+    return parts[0] if parts else ""
 
 def is_connected() -> bool:
-    result = subprocess.run(["nmcli", "-t", "-f", "STATE", "general"], capture_output=True, text=True)
+    result = subprocess.run(["/usr/bin/nmcli", "-t", "-f", "STATE", "general"], capture_output=True, text=True)
     return "connected" in result.stdout
 
 async def auto_connect_loop():
