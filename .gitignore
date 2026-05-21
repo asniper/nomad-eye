@@ -1,0 +1,26 @@
+# Python
+backend/venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Data (never commit local data)
+data/
+
+# Frontend build output and deps
+frontend/node_modules/
+frontend/dist/
+backend/static/
+
+# Models (large binary files - download via deploy.sh)
+models/yolo/*.onnx
+models/yolo/*.pt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

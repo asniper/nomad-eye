@@ -1,0 +1,14 @@
+[Unit]
+Description=Nomad Eye Network Manager
+After=NetworkManager.service
+
+[Service]
+User=arduino
+WorkingDirectory=/opt/nomad-eye/backend
+Environment="PATH=/opt/nomad-eye/backend/venv/bin"
+ExecStart=/opt/nomad-eye/backend/venv/bin/python -c "import asyncio; from networking.manager import auto_connect_loop; asyncio.run(auto_connect_loop())"
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
