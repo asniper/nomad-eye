@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends, BackgroundTasks
 from pydantic import BaseModel
 from networking.manager import (
     get_known_networks, connect_to_network, save_network,
-    start_access_point, stop_access_point, get_current_ip, is_connected, nmcli
+    start_access_point, stop_access_point, get_current_ip, is_connected, nmcli,
+    _terse_split
 )
 from api.routes.auth import require_auth
 
@@ -23,10 +24,9 @@ class AddNetworkRequest(BaseModel):
 def _get_current_ssid() -> str:
     raw = nmcli("-t", "-f", "ACTIVE,SSID", "dev", "wifi")
     for line in raw.splitlines():
-        # nmcli terse mode escapes ':' as '\:' — split only on unescaped colons
         parts = _terse_split(line, maxsplit=1)
         if len(parts) == 2 and parts[0].lower() == "yes":
-            return _terse_unescape(parts[1])
+            return parts[1]
     return ""
 
 
@@ -35,30 +35,9 @@ def _is_ap_active() -> bool:
     return any("NomadEye-AP" in line for line in raw.splitlines())
 
 
-def _terse_split(line: str, maxsplit: int = -1) -> list[str]:
-    """Split an nmcli terse line on unescaped ':' characters."""
-    parts = []
-    current = []
-    i = 0
-    splits = 0
-    while i < len(line):
-        if line[i] == '\\' and i + 1 < len(line):
-            current.append(line[i + 1])
-            i += 2
-        elif line[i] == ':' and (maxsplit < 0 or splits < maxsplit):
-            parts.append(''.join(current))
-            current = []
-            splits += 1
-            i += 1
-        else:
-            current.append(line[i])
-            i += 1
-    parts.append(''.join(current))
-    return parts
-
-
-def _terse_unescape(s: str) -> str:
-    return s.replace('\\:', ':').replace('\\\\', '\\')
+def _get_hostname() -> str:
+    import socket
+    return socket.gethostname()
 
 
 @router.get("/")
@@ -68,6 +47,7 @@ def network_status(_=Depends(require_auth)):
         "ip": get_current_ip(),
         "ssid": _get_current_ssid(),
         "ap_active": _is_ap_active(),
+        "hostname": _get_hostname(),
     }
 
 

@@ -129,6 +129,12 @@ export default function Network() {
               <Badge label={netStatus?.connected ? 'Connected' : 'Disconnected'}
                 color={netStatus?.connected ? 'green' : 'red'} />
             </div>
+            {netStatus?.hostname && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-400">Device name</span>
+                <span className="text-sm text-white font-mono">{netStatus.hostname}.local</span>
+              </div>
+            )}
             {netStatus?.ssid && (
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-400">Network</span>
