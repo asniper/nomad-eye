@@ -21,6 +21,8 @@ cfg = get_settings()
 COOLDOWN_SECS = 2        # how often YOLO runs while motion is present
 SCREENSHOT_INTERVAL = 5  # seconds between screenshots saved per active event
 EVENT_GAP = 30           # seconds of silence before an event is considered closed
+CLEAR_DETECTIONS_SECS = 5   # clear overlay N secs after motion stops completely
+STUCK_MOTION_SECS = 120     # auto-reset motion detector after N secs of continuous motion
 
 _MOTION_OVERLAP_THRESHOLD = 0.05
 
@@ -58,6 +60,8 @@ class DetectionPipeline:
         self._latest_detections: dict = {}
         self._overlay_enabled: dict = {cam.camera_id: True for cam in cameras}
         self._active_events: dict = {}  # camera_id -> timestamp of last stored detection
+        self._last_motion_time: dict = {}  # camera_id -> time of last frame with motion
+        self._motion_start: dict = {}      # camera_id -> start of current continuous motion
         self._lock = threading.Lock()
 
     def start(self):
@@ -107,6 +111,8 @@ class DetectionPipeline:
                 self._detectors[camera_id] = MotionDetector()
             self._latest_detections.pop(camera_id, None)
             self._active_events.pop(camera_id, None)
+        self._last_motion_time.pop(camera_id, None)
+        self._motion_start.pop(camera_id, None)
 
     def reload_camera(self, camera_id: int) -> bool:
         """Stop, remove, re-probe, and re-add a camera keeping the same ID."""
@@ -122,6 +128,8 @@ class DetectionPipeline:
             self._latest_detections.pop(camera_id, None)
             self._overlay_enabled.pop(camera_id, None)
             self._active_events.pop(camera_id, None)
+        self._last_motion_time.pop(camera_id, None)
+        self._motion_start.pop(camera_id, None)
 
         time.sleep(1.0)  # Give OS time to release the device
 
@@ -176,52 +184,83 @@ class DetectionPipeline:
             frame = frame_obj.data
             has_motion, motion_mask = motion_detector.detect(frame)
             now = time.time()
-            if has_motion and now > cooldown:
-                with self._lock:
-                    detector = self._object_detector
-                all_detections = detector.detect(frame)
-                detections = [d for d in all_detections if _bbox_has_motion(motion_mask, d.bbox)]
-                if detections:
-                    self._latest_detections[cam.camera_id] = detections
-                    active = self._active_events.setdefault(cam.camera_id, [])
-                    screenshot_needed = []
-                    for d in detections:
-                        ev = _match_detection(d, active, frame.shape)
-                        if ev is None:
-                            ev = {
-                                'event_id': str(uuid.uuid4()),
-                                'label': d.label,
-                                'category': d.category,
-                                'bbox': d.bbox,
-                                'last_seen': now,
-                                'last_screenshot': 0,
-                                'notified': False,
-                            }
-                            active.append(ev)
+
+            if has_motion:
+                if cam.camera_id not in self._motion_start:
+                    self._motion_start[cam.camera_id] = now
+                self._last_motion_time[cam.camera_id] = now
+
+                # Auto-reset if motion has been continuous for too long — background model is stuck
+                if now - self._motion_start[cam.camera_id] > STUCK_MOTION_SECS:
+                    with self._lock:
+                        self._detectors[cam.camera_id] = MotionDetector()
+                        self._latest_detections.pop(cam.camera_id, None)
+                        self._active_events.pop(cam.camera_id, None)
+                    motion_detector = self._detectors[cam.camera_id]
+                    self._motion_start.pop(cam.camera_id, None)
+                    self._last_motion_time.pop(cam.camera_id, None)
+                    cooldown = 0
+                    time.sleep(0.05)
+                    continue
+
+                if now > cooldown:
+                    with self._lock:
+                        detector = self._object_detector
+                    all_detections = detector.detect(frame)
+                    detections = [d for d in all_detections if _bbox_has_motion(motion_mask, d.bbox)]
+                    if detections:
+                        self._latest_detections[cam.camera_id] = detections
+                        active = self._active_events.setdefault(cam.camera_id, [])
+                        screenshot_needed = []
+                        for d in detections:
+                            ev = _match_detection(d, active, frame.shape)
+                            if ev is None:
+                                ev = {
+                                    'event_id': str(uuid.uuid4()),
+                                    'label': d.label,
+                                    'category': d.category,
+                                    'bbox': d.bbox,
+                                    'last_seen': now,
+                                    'last_screenshot': 0,
+                                    'notified': False,
+                                }
+                                active.append(ev)
+                            else:
+                                ev['bbox'] = d.bbox
+                                ev['last_seen'] = now
+                            if now - ev['last_screenshot'] >= SCREENSHOT_INTERVAL:
+                                screenshot_needed.append((d, ev))
+                        if screenshot_needed:
+                            annotated = self._annotate(frame.copy(), detections)
+                            ts = datetime.now(timezone.utc).isoformat()
+                            img_path = self._save_image(annotated, cam.camera_id, ts, detections)
+                            notify_dets = []
+                            first_new_event_id = None
+                            for d, ev in screenshot_needed:
+                                ev['last_screenshot'] = now
+                                is_new = not ev['notified']
+                                ev['notified'] = True
+                                self._store_detection_record(cam.camera_id, d, img_path, ts, ev['event_id'])
+                                if is_new:
+                                    notify_dets.append(d)
+                                    if first_new_event_id is None:
+                                        first_new_event_id = ev['event_id']
+                            if notify_dets:
+                                asyncio.run(dispatch_notification(cam.camera_id, notify_dets, img_path, ts, first_new_event_id))
                         else:
-                            ev['bbox'] = d.bbox
-                            ev['last_seen'] = now
-                        if now - ev['last_screenshot'] >= SCREENSHOT_INTERVAL:
-                            screenshot_needed.append((d, ev))
-                    if screenshot_needed:
-                        annotated = self._annotate(frame.copy(), detections)
-                        ts = datetime.now(timezone.utc).isoformat()
-                        img_path = self._save_image(annotated, cam.camera_id, ts, detections)
-                        notify_dets = []
-                        first_new_event_id = None
-                        for d, ev in screenshot_needed:
-                            ev['last_screenshot'] = now
-                            is_new = not ev['notified']
-                            ev['notified'] = True
-                            self._store_detection_record(cam.camera_id, d, img_path, ts, ev['event_id'])
-                            if is_new:
-                                notify_dets.append(d)
-                                if first_new_event_id is None:
-                                    first_new_event_id = ev['event_id']
-                        if notify_dets:
-                            asyncio.run(dispatch_notification(cam.camera_id, notify_dets, img_path, ts, first_new_event_id))
-                    active[:] = [ev for ev in active if now - ev['last_seen'] <= EVENT_GAP]
-                    cooldown = now + COOLDOWN_SECS
+                            # Motion present but YOLO found nothing in the motion area — clear overlay
+                            self._latest_detections.pop(cam.camera_id, None)
+                        active[:] = [ev for ev in active if now - ev['last_seen'] <= EVENT_GAP]
+                        cooldown = now + COOLDOWN_SECS
+            else:
+                # No motion this frame — reset continuous motion tracker
+                self._motion_start.pop(cam.camera_id, None)
+                # Clear overlay after CLEAR_DETECTIONS_SECS of no motion
+                last = self._last_motion_time.get(cam.camera_id)
+                if last and now - last > CLEAR_DETECTIONS_SECS:
+                    self._latest_detections.pop(cam.camera_id, None)
+                    self._last_motion_time.pop(cam.camera_id, None)
+
             time.sleep(0.05)
 
     def _annotate(self, frame, detections):
