@@ -514,17 +514,26 @@ function FacesCard() {
 }
 
 function FaceCard({ face, editing, editName, setEditName, saving, confirming, deleting, onEdit, onSave, onCancel, onDelete }) {
-  const imgUrl = `/api/faces/${face.id}/image`
+  const [imgUrl, setImgUrl] = useState(null)
+  useEffect(() => {
+    let url
+    facesApi.image(face.id)
+      .then(r => { url = URL.createObjectURL(r.data); setImgUrl(url) })
+      .catch(() => {})
+    return () => { if (url) URL.revokeObjectURL(url) }
+  }, [face.id])
+
   const isUnknown = face.name === 'Unknown'
   return (
     <div className="rounded-lg overflow-hidden" style={{ background: '#2A2A2A', border: '1px solid #3A3A3A' }}>
       <div className="relative aspect-square bg-[#1E1E1E]">
-        <img
-          src={imgUrl}
-          alt={face.name}
-          className="w-full h-full object-cover"
-          onError={e => { e.target.style.display = 'none' }}
-        />
+        {imgUrl && (
+          <img
+            src={imgUrl}
+            alt={face.name}
+            className="w-full h-full object-cover"
+          />
+        )}
         {isUnknown && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="w-12 h-12 rounded-full flex items-center justify-center"
