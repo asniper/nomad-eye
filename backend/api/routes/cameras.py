@@ -5,6 +5,7 @@ import sqlite3
 import cv2
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from pydantic import BaseModel
+from typing import Optional
 from api.routes.auth import require_auth
 from camera.capture import CameraCapture
 from detection.detector import CATEGORY_COLORS_BGR
@@ -48,11 +49,16 @@ def _get_usb_id(video_path: str) -> str:
     return video_name
 
 
-def _get_or_create_camera_id(db: sqlite3.Connection, usb_id: str) -> int:
-    """Look up usb_id in the cameras table; insert with next available ID if new."""
-    row = db.execute("SELECT camera_id FROM cameras WHERE usb_id=?", (usb_id,)).fetchone()
+def _get_or_create_camera_id(db: sqlite3.Connection, usb_id: str) -> Optional[int]:
+    """Look up usb_id in the cameras table; insert with next available ID if new.
+
+    Returns None if the camera was explicitly deleted — the scanner should skip it.
+    """
+    row = db.execute("SELECT camera_id, deleted FROM cameras WHERE usb_id=?", (usb_id,)).fetchone()
     now = datetime.now(timezone.utc).isoformat()
     if row:
+        if row['deleted']:
+            return None  # explicitly deleted — don't re-add
         db.execute("UPDATE cameras SET last_seen=? WHERE usb_id=?", (now, usb_id))
         db.commit()
         return row['camera_id']
@@ -64,6 +70,39 @@ def _get_or_create_camera_id(db: sqlite3.Connection, usb_id: str) -> int:
     )
     db.commit()
     return cam_id
+
+
+def _build_camera_list(db: sqlite3.Connection) -> list:
+    """Return the full camera list (non-deleted) with live pipeline state overlaid."""
+    db_cams = db.execute(
+        "SELECT camera_id, usb_id, name, last_seen FROM cameras WHERE deleted=0 ORDER BY camera_id"
+    ).fetchall()
+    event_counts = {
+        r['camera_id']: r['cnt']
+        for r in db.execute(
+            "SELECT camera_id, COUNT(DISTINCT event_id) as cnt FROM detections "
+            "WHERE event_id IS NOT NULL GROUP BY camera_id"
+        ).fetchall()
+    }
+    live = {}
+    if _pipeline is not None:
+        with _pipeline._lock:
+            for cam in _pipeline._cameras:
+                live[cam.camera_id] = cam
+    result = []
+    for row in db_cams:
+        cam_id = row['camera_id']
+        live_cam = live.get(cam_id)
+        result.append({
+            "id": cam_id,
+            "alive": live_cam.is_alive() if live_cam else False,
+            "device": live_cam.device_path if live_cam else None,
+            "usb_id": row['usb_id'],
+            "name": row['name'] or '',
+            "last_seen": row['last_seen'],
+            "event_count": event_counts.get(cam_id, 0),
+        })
+    return result
 
 
 def _probe_device(path: str) -> bool:
@@ -110,7 +149,7 @@ async def scan_and_refresh(db: sqlite3.Connection = None) -> list:
             usb_id = _get_usb_id(path)
             cam_id = _get_or_create_camera_id(_db, usb_id)
 
-            if cam_id in existing_cam_ids:
+            if cam_id is None or cam_id in existing_cam_ids:
                 continue
 
             ok = await loop.run_in_executor(None, _probe_device, path)
@@ -132,42 +171,13 @@ async def scan_and_refresh(db: sqlite3.Connection = None) -> list:
 
 @router.get("/")
 def list_cameras(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
-    db_cams = db.execute(
-        "SELECT camera_id, usb_id, name, last_seen FROM cameras ORDER BY camera_id"
-    ).fetchall()
-    event_counts = {
-        r['camera_id']: r['cnt']
-        for r in db.execute(
-            "SELECT camera_id, COUNT(DISTINCT event_id) as cnt FROM detections "
-            "WHERE event_id IS NOT NULL GROUP BY camera_id"
-        ).fetchall()
-    }
-    live = {}
-    if _pipeline is not None:
-        with _pipeline._lock:
-            for cam in _pipeline._cameras:
-                live[cam.camera_id] = cam
-    result = []
-    for row in db_cams:
-        cam_id = row['camera_id']
-        live_cam = live.get(cam_id)
-        result.append({
-            "id": cam_id,
-            "alive": live_cam.is_alive() if live_cam else False,
-            "device": live_cam.device_path if live_cam else None,
-            "usb_id": row['usb_id'],
-            "name": row['name'] or '',
-            "last_seen": row['last_seen'],
-            "event_count": event_counts.get(cam_id, 0),
-        })
-    return result
+    return _build_camera_list(db)
 
 
 @router.post("/refresh")
 async def refresh_cameras(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
-    cams = await scan_and_refresh(db)
-    names = _get_names(db)
-    return [_cam_dict(cam, names) for cam in cams]
+    await scan_and_refresh(db)
+    return _build_camera_list(db)
 
 
 @router.patch("/{camera_id}/name")
@@ -226,7 +236,7 @@ def delete_camera_permanently(
         except OSError:
             pass
     db.execute("DELETE FROM detections WHERE camera_id=?", (camera_id,))
-    db.execute("DELETE FROM cameras WHERE camera_id=?", (camera_id,))
+    db.execute("UPDATE cameras SET deleted=1 WHERE camera_id=?", (camera_id,))
     db.execute("DELETE FROM app_config WHERE key=?", (f"camera_name_{camera_id}",))
     db.commit()
     return {"ok": True}

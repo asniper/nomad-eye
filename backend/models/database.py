@@ -135,6 +135,7 @@ def init_db():
         "ALTER TABLE notification_rules ADD COLUMN frequency TEXT DEFAULT 'instant'",
         "ALTER TABLE notification_rules ADD COLUMN last_notified_at TEXT",
         "ALTER TABLE notification_queue ADD COLUMN events_json TEXT",
+        "ALTER TABLE cameras ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0",
     ]:
         try:
             db.execute(migration)
