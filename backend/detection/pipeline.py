@@ -18,7 +18,7 @@ cfg = get_settings()
 
 # Seconds of silence before a new detection is treated as a fresh event.
 # Prevents duplicate DB records and notification spam for the same continuous presence.
-COOLDOWN_SECS = 2        # how often YOLO runs while motion is present
+COOLDOWN_SECS = 0.3      # how often YOLO runs while motion is present
 SCREENSHOT_INTERVAL = 5  # seconds between screenshots saved per active event
 EVENT_GAP = 30           # seconds of silence before an event is considered closed
 CLEAR_DETECTIONS_SECS = 5   # clear overlay N secs after motion stops completely
@@ -63,6 +63,9 @@ class DetectionPipeline:
         self._last_motion_time: dict = {}  # camera_id -> time of last frame with motion
         self._motion_start: dict = {}      # camera_id -> start of current continuous motion
         self._lock = threading.Lock()
+        self._yolo_semaphore = threading.Semaphore(1)  # one YOLO call at a time across all camera threads
+        self._debug_stats: dict = {}   # camera_id -> live AI debug dict
+        self._auto_resets: dict = {}   # camera_id -> cumulative auto-reset count
 
     def start(self):
         self._running = True
@@ -113,6 +116,8 @@ class DetectionPipeline:
             self._active_events.pop(camera_id, None)
         self._last_motion_time.pop(camera_id, None)
         self._motion_start.pop(camera_id, None)
+        self._auto_resets.pop(camera_id, None)
+        self._debug_stats.pop(camera_id, None)
 
     def reload_camera(self, camera_id: int) -> bool:
         """Stop, remove, re-probe, and re-add a camera keeping the same ID."""
@@ -130,6 +135,8 @@ class DetectionPipeline:
             self._active_events.pop(camera_id, None)
         self._last_motion_time.pop(camera_id, None)
         self._motion_start.pop(camera_id, None)
+        self._auto_resets.pop(camera_id, None)
+        self._debug_stats.pop(camera_id, None)
 
         time.sleep(1.0)  # Give OS time to release the device
 
@@ -173,9 +180,29 @@ class DetectionPipeline:
     def get_latest(self, camera_id: int):
         return self._latest_detections.get(camera_id)
 
+    def get_debug(self, camera_id: int) -> dict:
+        return dict(self._debug_stats.get(camera_id, {}))
+
+    def _debug_snapshot(self, cam_id, state, has_motion, motion_secs,
+                         cooldown_remaining, last_yolo_ms, last_yolo_time, now):
+        return {
+            'state': state,
+            'has_motion': has_motion,
+            'motion_secs': round(motion_secs, 1),
+            'stuck_secs': STUCK_MOTION_SECS,
+            'cooldown_remaining': round(cooldown_remaining, 2),
+            'last_yolo_ms': last_yolo_ms,
+            'last_yolo_secs_ago': round(now - last_yolo_time, 1) if last_yolo_time else None,
+            'auto_resets': self._auto_resets.get(cam_id, 0),
+            'active_detections': len(self._latest_detections.get(cam_id) or []),
+        }
+
     def _run_camera(self, cam: CameraCapture):
         motion_detector = self._detectors[cam.camera_id]
         cooldown = 0
+        last_yolo_time = None
+        last_yolo_ms = None
+
         while self._running:
             frame_obj = cam.get_frame()
             if frame_obj is None:
@@ -189,9 +216,11 @@ class DetectionPipeline:
                 if cam.camera_id not in self._motion_start:
                     self._motion_start[cam.camera_id] = now
                 self._last_motion_time[cam.camera_id] = now
+                motion_secs = now - self._motion_start[cam.camera_id]
 
                 # Auto-reset if motion has been continuous for too long — background model is stuck
-                if now - self._motion_start[cam.camera_id] > STUCK_MOTION_SECS:
+                if motion_secs > STUCK_MOTION_SECS:
+                    self._auto_resets[cam.camera_id] = self._auto_resets.get(cam.camera_id, 0) + 1
                     with self._lock:
                         self._detectors[cam.camera_id] = MotionDetector()
                         self._latest_detections.pop(cam.camera_id, None)
@@ -200,13 +229,26 @@ class DetectionPipeline:
                     self._motion_start.pop(cam.camera_id, None)
                     self._last_motion_time.pop(cam.camera_id, None)
                     cooldown = 0
+                    self._debug_stats[cam.camera_id] = self._debug_snapshot(
+                        cam.camera_id, 'idle', False, 0, 0, last_yolo_ms, None, now)
                     time.sleep(0.05)
                     continue
 
+                cooldown_remaining = max(0.0, cooldown - now)
+                state = 'cooldown' if cooldown_remaining > 0 else 'motion'
+                self._debug_stats[cam.camera_id] = self._debug_snapshot(
+                    cam.camera_id, state, True, motion_secs, cooldown_remaining,
+                    last_yolo_ms, last_yolo_time, now)
+
                 if now > cooldown:
+                    t0 = time.time()
                     with self._lock:
                         detector = self._object_detector
-                    all_detections = detector.detect(frame)
+                    with self._yolo_semaphore:
+                        all_detections = detector.detect(frame)
+                    last_yolo_ms = round((time.time() - t0) * 1000)
+                    last_yolo_time = now
+
                     detections = [d for d in all_detections if _bbox_has_motion(motion_mask, d.bbox)]
                     if detections:
                         self._latest_detections[cam.camera_id] = detections
@@ -247,19 +289,25 @@ class DetectionPipeline:
                                         first_new_event_id = ev['event_id']
                             if notify_dets:
                                 asyncio.run(dispatch_notification(cam.camera_id, notify_dets, img_path, ts, first_new_event_id))
-                        else:
-                            # Motion present but YOLO found nothing in the motion area — clear overlay
-                            self._latest_detections.pop(cam.camera_id, None)
-                        active[:] = [ev for ev in active if now - ev['last_seen'] <= EVENT_GAP]
-                        cooldown = now + COOLDOWN_SECS
+                    else:
+                        # Motion present but YOLO found nothing in the motion area — clear overlay
+                        self._latest_detections.pop(cam.camera_id, None)
+                    active = self._active_events.get(cam.camera_id, [])
+                    active[:] = [ev for ev in active if now - ev['last_seen'] <= EVENT_GAP]
+                    cooldown = now + COOLDOWN_SECS
+                    # Refresh debug with latest YOLO stats
+                    self._debug_stats[cam.camera_id] = self._debug_snapshot(
+                        cam.camera_id, 'motion', True, motion_secs, 0,
+                        last_yolo_ms, last_yolo_time, now)
             else:
                 # No motion this frame — reset continuous motion tracker
                 self._motion_start.pop(cam.camera_id, None)
-                # Clear overlay after CLEAR_DETECTIONS_SECS of no motion
                 last = self._last_motion_time.get(cam.camera_id)
                 if last and now - last > CLEAR_DETECTIONS_SECS:
                     self._latest_detections.pop(cam.camera_id, None)
                     self._last_motion_time.pop(cam.camera_id, None)
+                self._debug_stats[cam.camera_id] = self._debug_snapshot(
+                    cam.camera_id, 'idle', False, 0, 0, last_yolo_ms, last_yolo_time, now)
 
             time.sleep(0.05)
 

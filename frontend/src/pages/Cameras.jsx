@@ -19,6 +19,53 @@ const DETECTION_BADGE = {
   other:    { background: 'rgba(245,158,11,0.15)', color: '#FCD34D' },
 }
 
+const STATE_STYLE = {
+  idle:     { label: 'Idle',     bg: '#2A2A2A', color: '#6B7280' },
+  motion:   { label: 'Motion',   bg: '#78350f', color: '#FCD34D' },
+  cooldown: { label: 'Cooldown', bg: '#1e3a5f', color: '#93C5FD' },
+  stuck:    { label: 'Stuck!',   bg: '#7f1d1d', color: '#FCA5A5' },
+}
+
+function DebugPanel({ info }) {
+  if (!info || Object.keys(info).length === 0) {
+    return (
+      <div className="rounded-lg bg-[#1A1A1A] border border-[#3A3A3A] px-3 py-2 text-xs text-gray-600 font-mono">
+        Waiting for AI debug data…
+      </div>
+    )
+  }
+  const s = STATE_STYLE[info.state] || STATE_STYLE.idle
+  return (
+    <div className="rounded-lg bg-[#1A1A1A] border border-[#3A3A3A] px-3 py-2.5 font-mono text-xs space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-gray-500 uppercase tracking-wider text-[10px]">AI Debug</span>
+        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold" style={{ background: s.bg, color: s.color }}>
+          {s.label}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+        <Row label="Motion" value={info.has_motion
+          ? `Yes · ${info.motion_secs}s${info.stuck_secs ? ` (reset at ${info.stuck_secs}s)` : ''}`
+          : 'No'} />
+        <Row label="Cooldown left" value={info.cooldown_remaining > 0 ? `${info.cooldown_remaining}s` : '—'} />
+        <Row label="YOLO latency" value={info.last_yolo_ms != null ? `${info.last_yolo_ms} ms` : '—'} />
+        <Row label="YOLO last ran" value={info.last_yolo_secs_ago != null ? `${info.last_yolo_secs_ago}s ago` : 'never'} />
+        <Row label="Active detections" value={info.active_detections ?? 0} />
+        <Row label="Auto-resets" value={info.auto_resets ?? 0} />
+      </div>
+    </div>
+  )
+}
+
+function Row({ label, value }) {
+  return (
+    <>
+      <span className="text-gray-600">{label}</span>
+      <span className="text-gray-300">{value}</span>
+    </>
+  )
+}
+
 function CameraDetections({ camId }) {
   const [rows, setRows] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -99,11 +146,24 @@ function CameraFeed({ cam, onNameSaved }) {
   const [resetting, setResetting] = useState(false)
   const [resetDone, setResetDone] = useState(false)
   const [showDetections, setShowDetections] = useState(false)
+  const [debugMode, setDebugMode] = useState(false)
+  const [debugInfo, setDebugInfo] = useState(null)
 
   const sendFilter = useCallback((hidden) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ hidden_categories: [...hidden] }))
     }
+  }, [])
+
+  const toggleDebug = useCallback(() => {
+    setDebugMode(prev => {
+      const next = !prev
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ debug: next }))
+      }
+      if (!next) setDebugInfo(null)
+      return next
+    })
   }, [])
 
   const toggleCategory = useCallback((cat) => {
@@ -124,6 +184,7 @@ function CameraFeed({ cam, onNameSaved }) {
     ws.onopen = () => {
       setConnected(true)
       sendFilter(hiddenCategories)
+      if (debugMode) ws.send(JSON.stringify({ debug: true }))
     }
     ws.onclose = () => {
       setConnected(false)
@@ -133,6 +194,10 @@ function CameraFeed({ cam, onNameSaved }) {
       intentionalClose.current = false
     }
     ws.onmessage = (e) => {
+      if (typeof e.data === 'string') {
+        try { setDebugInfo(JSON.parse(e.data)) } catch {}
+        return
+      }
       const url = URL.createObjectURL(e.data)
       if (imgRef.current) {
         const old = imgRef.current.src
@@ -237,6 +302,14 @@ function CameraFeed({ cam, onNameSaved }) {
           >
             {resetting ? 'Resetting…' : resetDone ? 'Reset ✓' : 'Reset AI'}
           </button>
+          <button
+            onClick={toggleDebug}
+            className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+            style={debugMode ? { background: '#4c6e5d', color: '#ffffff' } : { background: '#3A3A3A', color: '#9CA3AF' }}
+            title="Toggle live AI diagnostics"
+          >
+            Debug
+          </button>
         </div>
       </div>
 
@@ -265,6 +338,10 @@ function CameraFeed({ cam, onNameSaved }) {
         )}
         <img ref={imgRef} alt={displayName} className="w-full h-full object-contain" />
       </div>
+
+      {debugMode && (
+        <DebugPanel info={debugInfo} />
+      )}
 
       <button
         onClick={() => setShowDetections(p => !p)}

@@ -284,11 +284,12 @@ async def stream(websocket: WebSocket, camera_id: int):
         await websocket.close()
         return
 
-    # Categories the client wants drawn. None = all. Updated via incoming WS messages.
+    # State updated by the client reader task.
     hidden_categories: set = set()
+    debug_mode: bool = False
 
     async def read_client():
-        nonlocal hidden_categories
+        nonlocal hidden_categories, debug_mode
         try:
             async for msg in websocket.iter_text():
                 import json
@@ -296,12 +297,15 @@ async def stream(websocket: WebSocket, camera_id: int):
                     data = json.loads(msg)
                     if "hidden_categories" in data:
                         hidden_categories = set(data["hidden_categories"])
+                    if "debug" in data:
+                        debug_mode = bool(data["debug"])
                 except Exception:
                     pass
         except Exception:
             pass
 
     reader = asyncio.create_task(read_client())
+    last_debug_send = 0.0
     try:
         while True:
             if not cam.is_alive():
@@ -324,6 +328,18 @@ async def stream(websocket: WebSocket, camera_id: int):
                     await websocket.send_bytes(buf.tobytes())
                 except Exception:
                     break
+
+            # Send AI debug stats as a JSON text frame once per second when enabled.
+            import time as _time
+            now = _time.time()
+            if debug_mode and now - last_debug_send >= 1.0:
+                import json as _json
+                try:
+                    await websocket.send_text(_json.dumps(_pipeline.get_debug(camera_id)))
+                    last_debug_send = now
+                except Exception:
+                    break
+
             await asyncio.sleep(0.033)
     except (WebSocketDisconnect, Exception):
         pass
