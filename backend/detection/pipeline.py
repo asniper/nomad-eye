@@ -18,13 +18,33 @@ cfg = get_settings()
 
 # Seconds of silence before a new detection is treated as a fresh event.
 # Prevents duplicate DB records and notification spam for the same continuous presence.
-COOLDOWN_SECS = 0.3      # how often YOLO runs while motion is present
+COOLDOWN_SECS = 0.5      # how often YOLO runs while motion is present
+YOLO_TIMEOUT_SECS = 8   # skip a YOLO call if inference hasn't returned in this many seconds
 SCREENSHOT_INTERVAL = 5  # seconds between screenshots saved per active event
 EVENT_GAP = 30           # seconds of silence before an event is considered closed
 CLEAR_DETECTIONS_SECS = 5   # clear overlay N secs after motion stops completely
 STUCK_MOTION_SECS = 120     # auto-reset motion detector after N secs of continuous motion
 
 _MOTION_OVERLAP_THRESHOLD = 0.05
+
+
+def _detect_with_timeout(detector, frame):
+    """Run detector.detect in a daemon thread; returns [] on timeout so the
+    camera loop continues rather than blocking indefinitely on a stuck model."""
+    result = [None]
+    done = threading.Event()
+
+    def _worker():
+        try:
+            result[0] = detector.detect(frame)
+        except Exception:
+            result[0] = []
+        done.set()
+
+    threading.Thread(target=_worker, daemon=True).start()
+    if done.wait(timeout=YOLO_TIMEOUT_SECS):
+        return result[0] or [], False
+    return [], True  # timed out
 
 def _bbox_has_motion(mask, bbox):
     x1, y1, x2, y2 = bbox
@@ -63,9 +83,9 @@ class DetectionPipeline:
         self._last_motion_time: dict = {}  # camera_id -> time of last frame with motion
         self._motion_start: dict = {}      # camera_id -> start of current continuous motion
         self._lock = threading.Lock()
-        self._yolo_semaphore = threading.Semaphore(1)  # one YOLO call at a time across all camera threads
         self._debug_stats: dict = {}   # camera_id -> live AI debug dict
         self._auto_resets: dict = {}   # camera_id -> cumulative auto-reset count
+        self._yolo_timeouts: dict = {} # camera_id -> cumulative timeout count
 
     def start(self):
         self._running = True
@@ -117,6 +137,7 @@ class DetectionPipeline:
         self._last_motion_time.pop(camera_id, None)
         self._motion_start.pop(camera_id, None)
         self._auto_resets.pop(camera_id, None)
+        self._yolo_timeouts.pop(camera_id, None)
         self._debug_stats.pop(camera_id, None)
 
     def reload_camera(self, camera_id: int) -> bool:
@@ -136,6 +157,7 @@ class DetectionPipeline:
         self._last_motion_time.pop(camera_id, None)
         self._motion_start.pop(camera_id, None)
         self._auto_resets.pop(camera_id, None)
+        self._yolo_timeouts.pop(camera_id, None)
         self._debug_stats.pop(camera_id, None)
 
         time.sleep(1.0)  # Give OS time to release the device
@@ -194,6 +216,7 @@ class DetectionPipeline:
             'last_yolo_ms': last_yolo_ms,
             'last_yolo_secs_ago': round(now - last_yolo_time, 1) if last_yolo_time else None,
             'auto_resets': self._auto_resets.get(cam_id, 0),
+            'yolo_timeouts': self._yolo_timeouts.get(cam_id, 0),
             'active_detections': len(self._latest_detections.get(cam_id) or []),
         }
 
@@ -244,9 +267,17 @@ class DetectionPipeline:
                     t0 = time.time()
                     with self._lock:
                         detector = self._object_detector
-                    with self._yolo_semaphore:
-                        all_detections = detector.detect(frame)
-                    last_yolo_ms = round((time.time() - t0) * 1000)
+                    all_detections, timed_out = _detect_with_timeout(detector, frame)
+                    elapsed = time.time() - t0
+                    if timed_out:
+                        self._yolo_timeouts[cam.camera_id] = self._yolo_timeouts.get(cam.camera_id, 0) + 1
+                        cooldown = now + 5.0  # longer cooldown after a hung call
+                        self._debug_stats[cam.camera_id] = self._debug_snapshot(
+                            cam.camera_id, 'timeout', True, motion_secs, 5.0,
+                            last_yolo_ms, last_yolo_time, now)
+                        time.sleep(0.05)
+                        continue
+                    last_yolo_ms = round(elapsed * 1000)
                     last_yolo_time = now
 
                     detections = [d for d in all_detections if _bbox_has_motion(motion_mask, d.bbox)]

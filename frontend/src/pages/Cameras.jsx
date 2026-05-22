@@ -20,10 +20,11 @@ const DETECTION_BADGE = {
 }
 
 const STATE_STYLE = {
-  idle:     { label: 'Idle',     bg: '#2A2A2A', color: '#6B7280' },
-  motion:   { label: 'Motion',   bg: '#78350f', color: '#FCD34D' },
-  cooldown: { label: 'Cooldown', bg: '#1e3a5f', color: '#93C5FD' },
-  stuck:    { label: 'Stuck!',   bg: '#7f1d1d', color: '#FCA5A5' },
+  idle:     { label: 'Idle',         bg: '#2A2A2A', color: '#6B7280' },
+  motion:   { label: 'Motion',       bg: '#78350f', color: '#FCD34D' },
+  cooldown: { label: 'Cooldown',     bg: '#1e3a5f', color: '#93C5FD' },
+  stuck:    { label: 'Stuck!',       bg: '#7f1d1d', color: '#FCA5A5' },
+  timeout:  { label: 'YOLO Timeout', bg: '#581c87', color: '#D8B4FE' },
 }
 
 function DebugPanel({ info }) {
@@ -52,6 +53,9 @@ function DebugPanel({ info }) {
         <Row label="YOLO last ran" value={info.last_yolo_secs_ago != null ? `${info.last_yolo_secs_ago}s ago` : 'never'} />
         <Row label="Active detections" value={info.active_detections ?? 0} />
         <Row label="Auto-resets" value={info.auto_resets ?? 0} />
+        {(info.yolo_timeouts ?? 0) > 0 && (
+          <Row label="YOLO timeouts" value={<span style={{ color: '#D8B4FE' }}>{info.yolo_timeouts}</span>} />
+        )}
       </div>
     </div>
   )
