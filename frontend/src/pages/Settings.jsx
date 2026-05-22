@@ -1218,8 +1218,8 @@ function ConfidenceSliders({ allSettings, onSave, saving, saved }) {
               title={enabled ? 'Disable category' : 'Enable category'}
             >
               <span
-                className="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform"
-                style={{ transform: enabled ? 'translateX(17px)' : 'translateX(2px)' }}
+                className="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all duration-200"
+                style={enabled ? { right: '2px' } : { left: '2px' }}
               />
             </button>
             <input
