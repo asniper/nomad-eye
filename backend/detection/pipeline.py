@@ -328,20 +328,38 @@ class DetectionPipeline:
                         if screenshot_needed:
                             annotated = self._annotate(frame.copy(), detections)
                             ts = datetime.now(timezone.utc).isoformat()
-                            img_path = self._save_image(annotated, cam.camera_id, ts, detections)
+                            # Mark state immediately in the detection thread to
+                            # prevent duplicate screenshots/notifications.
                             notify_dets = []
                             first_new_event_id = None
+                            records = []
                             for d, ev in screenshot_needed:
                                 ev['last_screenshot'] = now
                                 is_new = not ev['notified']
                                 ev['notified'] = True
-                                self._store_detection_record(cam.camera_id, d, img_path, ts, ev['event_id'])
+                                records.append((d, ev['event_id']))
                                 if is_new:
                                     notify_dets.append(d)
                                     if first_new_event_id is None:
                                         first_new_event_id = ev['event_id']
-                            if notify_dets:
-                                asyncio.run(dispatch_notification(cam.camera_id, notify_dets, img_path, ts, first_new_event_id))
+                            # Offload all I/O to a daemon thread so the
+                            # detection loop is never blocked by disk or network.
+                            _cam_id = cam.camera_id
+                            _notify = list(notify_dets)
+                            _feid = first_new_event_id
+                            _records = list(records)
+                            def _persist(ann=annotated, timestamp=ts,
+                                         cam_id=_cam_id, dets=detections,
+                                         recs=_records, nd=_notify, feid=_feid):
+                                try:
+                                    ip = self._save_image(ann, cam_id, timestamp, dets)
+                                    for d, event_id in recs:
+                                        self._store_detection_record(cam_id, d, ip, timestamp, event_id)
+                                    if nd:
+                                        asyncio.run(dispatch_notification(cam_id, nd, ip, timestamp, feid))
+                                except Exception:
+                                    pass
+                            threading.Thread(target=_persist, daemon=True).start()
                     else:
                         # Motion present but YOLO found nothing in the motion area — clear overlay
                         self._latest_detections.pop(cam.camera_id, None)
