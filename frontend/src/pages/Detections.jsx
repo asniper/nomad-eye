@@ -8,9 +8,10 @@ const CATEGORY_STYLE = {
   people:   { background: 'rgba(239,68,68,0.15)',   color: '#F87171' },
   vehicles: { background: 'rgba(59,130,246,0.15)',  color: '#60A5FA' },
   animals:  { background: 'rgba(34,197,94,0.15)',   color: '#4ADE80' },
+  faces:    { background: 'rgba(168,85,247,0.15)',  color: '#C084FC' },
   other:    { background: 'rgba(245,158,11,0.15)',  color: '#FCD34D' },
 }
-const CATEGORIES = ['all', 'people', 'vehicles', 'animals', 'other']
+const CATEGORIES = ['all', 'people', 'vehicles', 'animals', 'faces', 'other']
 const PAGE_SIZE = 20
 
 function useBlobUrl(detectionId) {
@@ -181,32 +182,38 @@ export default function Detections() {
           <div>
             <label className="block text-xs text-gray-400 mb-1.5">Category</label>
             <div className="flex gap-1 flex-wrap">
-              {CATEGORIES.map(c => (
-                <button
-                  key={c}
-                  onClick={() => changeFilter(setCategory)(c)}
-                  className="px-3 py-1 rounded-md text-xs font-medium transition-opacity capitalize text-white hover:opacity-80"
-                  style={category === c
-                    ? { background: '#FFB800', color: '#151925' }
-                    : { background: '#3A3A3A', color: '#ffffff' }
-                  }
-                >
-                  {c}
-                </button>
-              ))}
+              {CATEGORIES.map(c => {
+                const active = category === c
+                const style = CATEGORY_STYLE[c]
+                return (
+                  <button
+                    key={c}
+                    onClick={() => changeFilter(setCategory)(c)}
+                    className="px-3 py-1 rounded-md text-xs font-medium transition-opacity capitalize hover:opacity-80"
+                    style={active
+                      ? { background: style?.color ?? '#FFB800', color: '#151925' }
+                      : { background: style ? style.background : '#3A3A3A', color: style?.color ?? '#9CA3AF', border: style ? `1px solid ${style.color}33` : '1px solid transparent' }
+                    }
+                  >
+                    {c}
+                  </button>
+                )
+              })}
             </div>
           </div>
           <div>
-            <label className="block text-xs text-gray-400 mb-1.5">Camera ID</label>
-            <input
-              type="number"
+            <label className="block text-xs text-gray-400 mb-1.5">Camera</label>
+            <select
               value={camFilter}
               onChange={e => changeFilter(setCamFilter)(e.target.value)}
-              placeholder="Any"
-              className="bg-[#3A3A3A] border border-[#484848] rounded-md px-3 py-1.5 text-sm text-white w-20 focus:outline-none transition-colors"
+              className="bg-[#3A3A3A] border border-[#484848] rounded-md px-3 py-1.5 text-sm text-white focus:outline-none transition-colors"
               onFocus={e => e.target.style.borderColor = '#4c6e5d'}
-              onBlur={e => e.target.style.borderColor = '#484848'}
-            />
+              onBlur={e => e.target.style.borderColor = '#484848'}>
+              <option value="">All cameras</option>
+              {Object.entries(cameraNames).map(([id, name]) => (
+                <option key={id} value={id}>{name}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-xs text-gray-400 mb-1.5">Label</label>

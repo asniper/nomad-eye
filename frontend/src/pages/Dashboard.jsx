@@ -10,6 +10,7 @@ const CATEGORY_STYLE = {
   people:   { background: 'rgba(239,68,68,0.15)',   color: '#F87171' },
   vehicles: { background: 'rgba(59,130,246,0.15)',  color: '#60A5FA' },
   animals:  { background: 'rgba(34,197,94,0.15)',   color: '#4ADE80' },
+  faces:    { background: 'rgba(168,85,247,0.15)',  color: '#C084FC' },
   other:    { background: 'rgba(245,158,11,0.15)',  color: '#FCD34D' },
 }
 const STATUS_STYLE = {
@@ -189,7 +190,7 @@ export default function Dashboard() {
       {/* Detection category breakdown */}
       {Object.keys(byCategory).length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {['people', 'vehicles', 'animals', 'other'].map(cat => (
+          {['people', 'vehicles', 'animals', 'faces', 'other'].map(cat => (
             <Card key={cat}>
               <p className="text-2xl font-bold" style={{ color: CATEGORY_STYLE[cat].color }}>
                 {(byCategory[cat] ?? 0).toLocaleString()}

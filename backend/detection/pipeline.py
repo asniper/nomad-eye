@@ -90,6 +90,7 @@ class DetectionPipeline:
         self._auto_resets: dict = {}   # camera_id -> cumulative auto-reset count
         self._yolo_timeouts: dict = {} # camera_id -> cumulative timeout count
         self._motion_bboxes: dict = {} # camera_id -> (x1,y1,x2,y2) of current motion region
+        self._enabled_categories: set = {'people', 'vehicles', 'animals', 'other', 'faces'}
 
     def start(self):
         self._running = True
@@ -133,6 +134,12 @@ class DetectionPipeline:
 
     def set_face_confidence(self, value: float):
         self._face_recognizer.set_min_confidence(value)
+
+    def set_category_enabled(self, category: str, enabled: bool):
+        if enabled:
+            self._enabled_categories.add(category)
+        else:
+            self._enabled_categories.discard(category)
 
     def set_category_confidence(self, category: str, value: float):
         with self._lock:
@@ -299,22 +306,30 @@ class DetectionPipeline:
                         detector = self._object_detector
                         face_rec = self._face_recognizer
 
-                    # Run face recognition in parallel with YOLO
+                    # Run face recognition in parallel with YOLO (only if enabled)
                     face_result: list = []
                     face_done = threading.Event()
-                    def _face_work(fr=face_rec, f=frame):
-                        try:
-                            face_result.extend(fr.detect_and_recognize(f))
-                        except Exception:
-                            pass
+                    faces_enabled = 'faces' in self._enabled_categories
+                    if faces_enabled:
+                        def _face_work(fr=face_rec, f=frame):
+                            try:
+                                face_result.extend(fr.detect_and_recognize(f))
+                            except Exception:
+                                pass
+                            face_done.set()
+                        threading.Thread(target=_face_work, daemon=True).start()
+                    else:
                         face_done.set()
-                    threading.Thread(target=_face_work, daemon=True).start()
 
                     all_detections, timed_out = _detect_with_timeout(detector, frame)
 
                     # Collect face results (should finish long before YOLO)
-                    face_done.wait(timeout=3.0)
+                    if faces_enabled:
+                        face_done.wait(timeout=3.0)
                     all_detections = all_detections + face_result
+
+                    # Filter out disabled categories
+                    all_detections = [d for d in all_detections if d.category in self._enabled_categories]
                     elapsed = time.time() - t0
                     if timed_out:
                         self._yolo_timeouts[cam.camera_id] = self._yolo_timeouts.get(cam.camera_id, 0) + 1
@@ -378,6 +393,9 @@ class DetectionPipeline:
                                          recs=_records, nd=_notify, feid=_feid):
                                 try:
                                     ip = self._save_image(ann, cam_id, timestamp, dets)
+                                except Exception:
+                                    ip = None
+                                try:
                                     for d, event_id in recs:
                                         self._store_detection_record(cam_id, d, ip, timestamp, event_id)
                                     if nd:

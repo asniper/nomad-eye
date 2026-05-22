@@ -50,4 +50,7 @@ async def set_setting(body: ConfigItem, db: sqlite3.Connection = Depends(get_db)
             _pipeline.set_face_confidence(float(body.value))
         except ValueError:
             pass
+    elif body.key.startswith('category_enabled_') and _pipeline is not None:
+        category = body.key[len('category_enabled_'):]
+        _pipeline.set_category_enabled(category, body.value != '0')
     return {"saved": True}

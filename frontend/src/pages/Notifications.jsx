@@ -4,13 +4,14 @@ import Badge from '../components/Badge'
 import { notifications, settings as settingsApi } from '../api/client'
 import { formatDateTime } from '../utils/dates'
 
-const CATEGORIES = ['people', 'vehicles', 'animals', 'other']
+const CATEGORIES = ['people', 'vehicles', 'animals', 'faces', 'other']
 const STATUSES = ['home', 'away', 'sleep', 'vacation']
 
 const CATEGORY_STYLE = {
   people:   { background: 'rgba(239,68,68,0.15)',   color: '#F87171' },
   vehicles: { background: 'rgba(59,130,246,0.15)',  color: '#60A5FA' },
   animals:  { background: 'rgba(34,197,94,0.15)',   color: '#4ADE80' },
+  faces:    { background: 'rgba(168,85,247,0.15)',  color: '#C084FC' },
   other:    { background: 'rgba(245,158,11,0.15)',  color: '#FCD34D' },
 }
 const STATUS_STYLE = {

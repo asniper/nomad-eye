@@ -1025,11 +1025,12 @@ function ExternalDevicesCard() {
   )
 }
 
-const PURGE_CATEGORIES = ['all', 'people', 'vehicles', 'animals', 'other']
+const PURGE_CATEGORIES = ['all', 'people', 'vehicles', 'animals', 'faces', 'other']
 const CATEGORY_STYLE = {
   people:   { background: 'rgba(239,68,68,0.15)',   color: '#F87171' },
   vehicles: { background: 'rgba(59,130,246,0.15)',  color: '#60A5FA' },
   animals:  { background: 'rgba(34,197,94,0.15)',   color: '#4ADE80' },
+  faces:    { background: 'rgba(168,85,247,0.15)',  color: '#C084FC' },
   other:    { background: 'rgba(245,158,11,0.15)',  color: '#FCD34D' },
 }
 
@@ -1204,25 +1205,43 @@ function ConfidenceSliders({ allSettings, onSave, saving, saved }) {
 
   return (
     <div className="space-y-3">
-      {CONF_CATEGORIES.map(({ key, label, color }) => (
-        <div key={key} className="flex items-center gap-3">
-          <span className="text-xs font-medium w-16 shrink-0" style={{ color }}>{label}</span>
-          <input
-            type="range"
-            min={0.05} max={0.95} step={0.05}
-            value={vals[key]}
-            onChange={e => setVals(v => ({ ...v, [key]: parseFloat(e.target.value) }))}
-            onMouseUp={e => onSave(key, parseFloat(e.target.value))}
-            onTouchEnd={e => onSave(key, vals[key])}
-            className="flex-1 accent-[#FFB800] cursor-pointer"
-          />
-          <span className="text-xs font-mono text-gray-300 w-9 text-right shrink-0">
-            {Math.round(vals[key] * 100)}%
-          </span>
-          {saving[key] && <span className="text-xs text-gray-500 shrink-0">…</span>}
-          {saved[key] && <span className="text-xs text-green-400 shrink-0">✓</span>}
-        </div>
-      ))}
+      {CONF_CATEGORIES.map(({ key, label, color }) => {
+        const enabledKey = `category_enabled_${key.replace('confidence_', '')}`
+        const enabled = (allSettings[enabledKey] ?? '1') !== '0'
+        return (
+          <div key={key} className="flex items-center gap-3">
+            <span className="text-xs font-medium w-16 shrink-0" style={{ color: enabled ? color : '#555' }}>{label}</span>
+            <button
+              onClick={() => onSave(enabledKey, enabled ? '0' : '1')}
+              className="shrink-0 relative w-8 h-4 rounded-full transition-colors"
+              style={{ background: enabled ? color : '#3A3A3A' }}
+              title={enabled ? 'Disable category' : 'Enable category'}
+            >
+              <span
+                className="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform"
+                style={{ transform: enabled ? 'translateX(17px)' : 'translateX(2px)' }}
+              />
+            </button>
+            <input
+              type="range"
+              min={0.05} max={0.95} step={0.05}
+              value={vals[key]}
+              onChange={e => { if (enabled) setVals(v => ({ ...v, [key]: parseFloat(e.target.value) })) }}
+              onMouseUp={e => { if (enabled) onSave(key, parseFloat(e.target.value)) }}
+              onTouchEnd={() => { if (enabled) onSave(key, vals[key]) }}
+              disabled={!enabled}
+              className="flex-1 cursor-pointer transition-opacity"
+              style={{ opacity: enabled ? 1 : 0.25, accentColor: '#FFB800', pointerEvents: enabled ? 'auto' : 'none' }}
+            />
+            <span className="text-xs font-mono w-9 text-right shrink-0 transition-opacity"
+              style={{ color: enabled ? '#D1D5DB' : '#555', opacity: enabled ? 1 : 0.4 }}>
+              {Math.round(vals[key] * 100)}%
+            </span>
+            {(saving[key] || saving[enabledKey]) && <span className="text-xs text-gray-500 shrink-0">…</span>}
+            {(saved[key] || saved[enabledKey]) && !saving[key] && !saving[enabledKey] && <span className="text-xs text-green-400 shrink-0">✓</span>}
+          </div>
+        )
+      })}
     </div>
   )
 }

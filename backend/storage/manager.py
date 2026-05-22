@@ -21,9 +21,12 @@ def get_active_images_dir() -> str:
     if row and row[0]:
         mp = _get_mount_point(row[0])
         if mp:
-            images_path = Path(mp) / "nomadeye" / "images"
-            images_path.mkdir(parents=True, exist_ok=True)
-            return str(images_path)
+            try:
+                images_path = Path(mp) / "nomadeye" / "images"
+                images_path.mkdir(parents=True, exist_ok=True)
+                return str(images_path)
+            except Exception:
+                pass  # fall through to internal storage
 
     internal = Path(INTERNAL_IMAGES_DIR)
     internal.mkdir(parents=True, exist_ok=True)
