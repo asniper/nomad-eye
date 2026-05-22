@@ -1,5 +1,5 @@
 import asyncio
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from networking.manager import (
     get_known_networks, connect_to_network, connect_saved_network, save_network,
@@ -60,6 +60,19 @@ def known_networks(_=Depends(require_auth)):
     return get_known_networks()
 
 
+@router.delete("/known/{ssid}")
+def delete_network(ssid: str, _=Depends(require_auth)):
+    import subprocess
+    result = subprocess.run(
+        ["/usr/bin/nmcli", "con", "delete", ssid],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=result.stderr.strip() or "Failed to delete network")
+    return {"deleted": ssid}
+
+
 @router.post("/connect")
 async def connect(body: ConnectRequest, background_tasks: BackgroundTasks, _=Depends(require_auth)):
     """Kick off a WiFi connection attempt and return immediately.
@@ -108,11 +121,14 @@ def scan(_=Depends(require_auth)):
 
 @router.post("/ap/start")
 def ap_start(_=Depends(require_auth)):
-    start_access_point()
-    return {"ap": "started"}
+    try:
+        start_access_point()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"ap": "started", "active": _is_ap_active()}
 
 
 @router.post("/ap/stop")
 def ap_stop(_=Depends(require_auth)):
     stop_access_point()
-    return {"ap": "stopped"}
+    return {"ap": "stopped", "active": _is_ap_active()}

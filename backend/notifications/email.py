@@ -8,7 +8,7 @@ from config.settings import get_settings
 
 cfg = get_settings()
 
-async def send_email(to: str, subject: str, body: str, image_path: str = None):
+async def send_email(to: str, subject: str, body: str, image_paths=None):
     db = sqlite3.connect(cfg.db_path)
     db.row_factory = sqlite3.Row
     smtp_host = db.execute("SELECT value FROM app_config WHERE key = ?", ("smtp_host",)).fetchone()
@@ -22,17 +22,24 @@ async def send_email(to: str, subject: str, body: str, image_path: str = None):
     smtp_from = smtp_from_row["value"] if smtp_from_row else smtp_user
     db.close()
 
+    # Normalise: accept a single path string or a list of paths
+    if isinstance(image_paths, str):
+        image_paths = [image_paths]
+    elif not image_paths:
+        image_paths = []
+
     msg = MIMEMultipart()
     msg["From"] = smtp_from
     msg["To"] = to
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
 
-    if image_path and Path(image_path).exists():
-        with open(image_path, "rb") as f:
-            img = MIMEImage(f.read())
-            img.add_header("Content-Disposition", "attachment", filename=Path(image_path).name)
-            msg.attach(img)
+    for path in image_paths:
+        if path and Path(path).exists():
+            with open(path, "rb") as f:
+                img = MIMEImage(f.read())
+                img.add_header("Content-Disposition", "attachment", filename=Path(path).name)
+                msg.attach(img)
 
     with smtplib.SMTP(smtp_host, smtp_port) as server:
         server.starttls()

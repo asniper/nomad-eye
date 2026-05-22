@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
-import { network } from '../api/client'
+import { network, settings as settingsApi } from '../api/client'
 
 const WIFI_ICON = (
   <svg className="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -9,6 +9,60 @@ const WIFI_ICON = (
       d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
   </svg>
 )
+
+function ExternalAccessCard() {
+  const [url, setUrl] = useState('')
+  const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    settingsApi.getAll().then(r => setUrl(r.data?.external_url ?? '')).catch(() => {})
+  }, [])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await settingsApi.set('external_url', url)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch {}
+    setSaving(false)
+  }
+
+  const inputCls = "bg-[#3A3A3A] border border-[#484848] rounded-md px-3 py-1.5 text-sm text-white focus:outline-none transition-colors flex-1 min-w-0"
+
+  return (
+    <Card title="Remote Access">
+      <p className="text-sm text-gray-400 mb-4">
+        Optional external URL for accessing Nomad Eye outside your local network — via a VPN, reverse proxy, or port forward. Used as the link destination in notifications.
+      </p>
+      <div className="flex items-center gap-2">
+        <input
+          type="url"
+          value={url}
+          onChange={e => { setUrl(e.target.value); setSaved(false) }}
+          placeholder="https://nomadeye.example.com"
+          className={inputCls}
+          onFocus={e => e.target.style.borderColor = '#4c6e5d'}
+          onBlur={e => e.target.style.borderColor = '#484848'}
+        />
+        <button
+          onClick={save}
+          disabled={saving}
+          className="px-3 py-1.5 disabled:opacity-40 text-sm rounded-md transition-opacity hover:opacity-90 shrink-0"
+          style={{ background: '#FFB800', color: '#151925' }}
+        >
+          {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save'}
+        </button>
+      </div>
+      {url && (
+        <p className="text-xs text-gray-500 mt-2">
+          Notifications will link to <span className="font-mono text-gray-300">{url}</span>
+        </p>
+      )}
+    </Card>
+  )
+}
 
 export default function Network() {
   const [netStatus, setNetStatus] = useState(null)
@@ -19,8 +73,9 @@ export default function Network() {
   const [loading, setLoading] = useState(true)
   const [connectTarget, setConnectTarget] = useState(null)
   const [connectPassword, setConnectPassword] = useState('')
-  const [connectMsg, setConnectMsg] = useState(null)  // { ok, text }
+  const [connectMsg, setConnectMsg] = useState(null)
   const [connecting, setConnecting] = useState(false)
+  const [apToggling, setApToggling] = useState(false)
   const pollRef = useRef(null)
 
   const fetchStatus = useCallback(() =>
@@ -38,8 +93,6 @@ export default function Network() {
   }, [fetchStatus])
 
   useEffect(() => { reload() }, [reload])
-
-  // Stop polling when component unmounts
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
   const scan = async () => {
@@ -58,24 +111,18 @@ export default function Network() {
   const startPolling = (targetSsid) => {
     if (pollRef.current) clearInterval(pollRef.current)
     let attempts = 0
-    const maxAttempts = 20 // 40 seconds total
-
     pollRef.current = setInterval(async () => {
       attempts++
       const status = await fetchStatus()
-
       if (status?.ssid === targetSsid) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
+        clearInterval(pollRef.current); pollRef.current = null
         setConnecting(false)
         setConnectMsg({ ok: true, text: `Connected to ${targetSsid}` })
         reload()
         return
       }
-
-      if (attempts >= maxAttempts) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
+      if (attempts >= 20) {
+        clearInterval(pollRef.current); pollRef.current = null
         setConnecting(false)
         setConnectMsg({ ok: false, text: `Could not connect to ${targetSsid}. Check the password and try again.` })
       }
@@ -89,7 +136,6 @@ export default function Network() {
     setConnectMsg({ ok: null, text: `Connecting to ${target}…` })
     setConnectTarget(null)
     setConnectPassword('')
-
     try {
       await network.connect(target, connectPassword)
       startPolling(target)
@@ -114,33 +160,37 @@ export default function Network() {
 
   const cancelConnect = () => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
-    setConnecting(false)
-    setConnectMsg(null)
-    setConnectTarget(null)
-    setConnectPassword('')
+    setConnecting(false); setConnectMsg(null); setConnectTarget(null); setConnectPassword('')
   }
 
   const toggleAp = async () => {
+    const wasActive = apActive
+    setApToggling(true)
     try {
-      if (apActive) await network.apStop()
-      else await network.apStart()
-      setApActive(a => !a)
-    } catch {}
+      const r = wasActive ? await network.apStop() : await network.apStart()
+      setApActive(r.data.active)
+    } catch (err) {
+      if (!wasActive && !err.response) {
+        setApActive(true)
+      } else {
+        alert(err?.response?.data?.detail || 'Failed to toggle hotspot.')
+        await fetchStatus().then(s => s && setApActive(s.ap_active || false))
+      }
+    } finally {
+      setApToggling(false)
+    }
   }
 
   if (loading) return <div className="text-gray-500 text-sm">Loading...</div>
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold">Network</h2>
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card title="Current Status">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray-400">Connection</span>
-              <Badge label={netStatus?.connected ? 'Connected' : 'Disconnected'}
-                color={netStatus?.connected ? 'green' : 'red'} />
+              <Badge label={netStatus?.connected ? 'Connected' : 'Disconnected'} color={netStatus?.connected ? 'green' : 'red'} />
             </div>
             {netStatus?.hostname && (
               <div className="flex items-center justify-between">
@@ -164,9 +214,7 @@ export default function Network() {
         </Card>
 
         <Card title="Hotspot (AP Mode)">
-          <p className="text-sm text-gray-400 mb-3">
-            Broadcast a WiFi hotspot so you can connect directly to the device.
-          </p>
+          <p className="text-sm text-gray-400 mb-3">Broadcast a WiFi hotspot so you can connect directly to the device.</p>
           <div className="flex items-center justify-between">
             <div>
               <Badge label={apActive ? 'Active' : 'Inactive'} color={apActive ? 'green' : 'gray'} />
@@ -174,11 +222,11 @@ export default function Network() {
             </div>
             <button
               onClick={toggleAp}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                apActive ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-green-600 hover:bg-green-700 text-white'
-              }`}
+              disabled={apToggling}
+              className="px-4 py-1.5 rounded-md text-sm font-medium text-white disabled:opacity-50 hover:opacity-80 transition-opacity"
+              style={{ background: apActive ? '#dc2626' : '#FFB800', color: '#ffffff' }}
             >
-              {apActive ? 'Stop Hotspot' : 'Start Hotspot'}
+              {apToggling ? '…' : apActive ? 'Stop Hotspot' : 'Start Hotspot'}
             </button>
           </div>
         </Card>
@@ -186,7 +234,7 @@ export default function Network() {
 
       <Card title="Known Networks">
         {known.length === 0 && <p className="text-gray-500 text-sm">No saved networks.</p>}
-        <div className="divide-y divide-gray-800">
+        <div className="divide-y divide-[#3A3A3A]">
           {known.map((n, i) => {
             const isCurrent = netStatus?.ssid === n.ssid
             return (
@@ -202,12 +250,25 @@ export default function Network() {
                       <button
                         onClick={() => connectSaved(n.ssid)}
                         disabled={connecting}
-                        className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40 transition-colors"
+                        className="text-xs disabled:opacity-40 transition-colors hover:text-white"
+                        style={{ color: '#FFB800' }}
                       >
                         Connect
                       </button>
                     )
                   }
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`Remove "${n.ssid}" from saved networks?`)) return
+                      try {
+                        await network.deleteKnown(n.ssid)
+                        setKnown(k => k.filter(x => x.ssid !== n.ssid))
+                      } catch {}
+                    }}
+                    className="text-xs text-gray-600 hover:text-red-400 transition-colors ml-1"
+                  >
+                    ✕
+                  </button>
                 </div>
               </div>
             )
@@ -220,19 +281,19 @@ export default function Network() {
           <button
             onClick={scan}
             disabled={scanning || connecting}
-            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm rounded-md transition-colors"
+            className="px-4 py-1.5 disabled:opacity-50 text-white text-sm rounded-md hover:opacity-90 transition-opacity"
+            style={{ background: '#FFB800', color: '#151925' }}
           >
             {scanning ? 'Scanning...' : 'Scan'}
           </button>
           {scanning && <span className="text-xs text-gray-500">This may take a few seconds…</span>}
         </div>
 
-        {/* Connection status banner */}
         {connectMsg && (
           <div className={`flex items-center justify-between gap-3 mb-4 px-3 py-2 rounded-lg text-sm ${
             connectMsg.ok === true ? 'bg-green-500/10 text-green-400' :
             connectMsg.ok === false ? 'bg-red-500/10 text-red-400' :
-            'bg-blue-500/10 text-blue-300'
+            'bg-[#151925]/10 text-[#FFB800]'
           }`}>
             <span className="flex items-center gap-2">
               {connectMsg.ok === null && (
@@ -244,21 +305,16 @@ export default function Network() {
               {connectMsg.text}
             </span>
             {connecting && (
-              <button onClick={cancelConnect} className="text-xs text-gray-400 hover:text-white shrink-0">
-                Cancel
-              </button>
+              <button onClick={cancelConnect} className="text-xs text-gray-400 hover:text-white shrink-0">Cancel</button>
             )}
             {!connecting && (
-              <button onClick={() => setConnectMsg(null)} className="text-xs text-gray-400 hover:text-white shrink-0">
-                ✕
-              </button>
+              <button onClick={() => setConnectMsg(null)} className="text-xs text-gray-400 hover:text-white shrink-0">✕</button>
             )}
           </div>
         )}
 
-        {/* Password form for selected network */}
         {connectTarget && !connecting && (
-          <form onSubmit={connect} className="flex flex-wrap items-center gap-2 mb-4 p-3 bg-gray-800 rounded-lg">
+          <form onSubmit={connect} className="flex flex-wrap items-center gap-2 mb-4 p-3 bg-[#3A3A3A] rounded-lg">
             <span className="text-sm text-white font-medium">{connectTarget}</span>
             <input
               type="password"
@@ -266,18 +322,21 @@ export default function Network() {
               onChange={e => setConnectPassword(e.target.value)}
               placeholder="Password"
               autoFocus
-              className="flex-1 min-w-32 bg-gray-700 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+              className="flex-1 min-w-32 bg-[#2E2E2E] border border-[#484848] rounded-md px-3 py-1.5 text-sm text-white focus:outline-none transition-colors"
+              onFocus={e => e.target.style.borderColor = '#151925'}
+              onBlur={e => e.target.style.borderColor = '#484848'}
             />
             <button
               type="submit"
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md transition-colors whitespace-nowrap"
+              className="px-3 py-1.5 text-white text-sm rounded-md hover:opacity-90 transition-opacity whitespace-nowrap"
+              style={{ background: '#FFB800', color: '#151925' }}
             >
               Connect
             </button>
             <button
               type="button"
               onClick={cancelConnect}
-              className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded-md transition-colors"
+              className="px-3 py-1.5 bg-[#484848] hover:bg-[#3A3A3A] text-white text-sm rounded-md transition-colors"
             >
               Cancel
             </button>
@@ -285,7 +344,7 @@ export default function Network() {
         )}
 
         {scanResults.length > 0 && (
-          <div className="divide-y divide-gray-800">
+          <div className="divide-y divide-[#3A3A3A]">
             {scanResults.map((n, i) => (
               <div key={i} className="flex items-center justify-between py-2.5">
                 <div className="flex items-center gap-3">
@@ -303,13 +362,10 @@ export default function Network() {
                         disabled={connecting}
                         onClick={() => {
                           setConnectMsg(null)
-                          if (n.saved) {
-                            connectSaved(n.ssid)
-                          } else {
-                            setConnectTarget(n.ssid)
-                          }
+                          n.saved ? connectSaved(n.ssid) : setConnectTarget(n.ssid)
                         }}
-                        className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40 transition-colors"
+                        className="text-xs disabled:opacity-40 transition-colors hover:text-white"
+                        style={{ color: '#FFB800' }}
                       >
                         {n.saved ? 'Switch' : 'Connect'}
                       </button>
@@ -325,6 +381,8 @@ export default function Network() {
           <p className="text-gray-600 text-sm">Press Scan to find available networks.</p>
         )}
       </Card>
+
+      <ExternalAccessCard />
     </div>
   )
 }

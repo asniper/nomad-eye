@@ -5,8 +5,10 @@ from config.settings import get_settings
 cfg = get_settings()
 
 def get_db():
-    db = sqlite3.connect(cfg.db_path)
+    db = sqlite3.connect(cfg.db_path, timeout=15, check_same_thread=False)
     db.row_factory = sqlite3.Row
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA busy_timeout=10000")
     try:
         yield db
     finally:
@@ -26,7 +28,8 @@ def init_db():
             image_path TEXT,
             clip_path TEXT,
             timestamp TEXT NOT NULL,
-            notified INTEGER DEFAULT 0
+            notified INTEGER DEFAULT 0,
+            event_id TEXT
         );
 
         CREATE TABLE IF NOT EXISTS contacts (
@@ -34,6 +37,7 @@ def init_db():
             name TEXT NOT NULL,
             type TEXT NOT NULL CHECK(type IN ('sms', 'email')),
             address TEXT NOT NULL,
+            carrier TEXT,
             active INTEGER DEFAULT 1
         );
 
@@ -68,6 +72,71 @@ def init_db():
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS notification_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rule_id INTEGER NOT NULL UNIQUE,
+            contact_id INTEGER,
+            contact_name TEXT,
+            channel TEXT NOT NULL,
+            address TEXT NOT NULL,
+            carrier TEXT,
+            camera_id INTEGER,
+            event_id TEXT,
+            labels TEXT,
+            message TEXT,
+            image_path TEXT,
+            queued_at TEXT NOT NULL,
+            scheduled_for TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS notification_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            contact_id INTEGER,
+            contact_name TEXT,
+            channel TEXT NOT NULL,
+            address TEXT NOT NULL,
+            camera_id INTEGER,
+            event_id TEXT,
+            labels TEXT,
+            message TEXT,
+            status TEXT NOT NULL,
+            error TEXT
+        );
     """)
     db.commit()
+    try:
+        db.execute("CREATE INDEX IF NOT EXISTS idx_notif_log_ts ON notification_log (timestamp DESC)")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("CREATE INDEX IF NOT EXISTS idx_detections_event_conf ON detections (event_id, confidence DESC)")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass
+    # Cameras table for stable USB-based identity across reboots
+    cursor.executescript("""
+        CREATE TABLE IF NOT EXISTS cameras (
+            camera_id INTEGER PRIMARY KEY,
+            usb_id    TEXT UNIQUE NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+    """)
+    db.commit()
+
+    for migration in [
+        "ALTER TABLE detections ADD COLUMN event_id TEXT",
+        "ALTER TABLE contacts ADD COLUMN carrier TEXT",
+        "ALTER TABLE notification_log ADD COLUMN message TEXT",
+        "ALTER TABLE notification_rules ADD COLUMN frequency TEXT DEFAULT 'instant'",
+        "ALTER TABLE notification_rules ADD COLUMN last_notified_at TEXT",
+        "ALTER TABLE notification_queue ADD COLUMN events_json TEXT",
+    ]:
+        try:
+            db.execute(migration)
+            db.commit()
+        except sqlite3.OperationalError:
+            pass
     db.close()

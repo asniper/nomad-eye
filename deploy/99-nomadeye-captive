@@ -1,0 +1,14 @@
+#!/bin/bash
+IFACE="$1"
+ACTION="$2"
+[ "$CONNECTION_ID" = "NomadEye-AP" ] || exit 0
+case "$ACTION" in
+    up)
+        /usr/sbin/iptables -I INPUT 1 -i "$IFACE" -p tcp --dport 8000 -j ACCEPT 2>/dev/null || true
+        /usr/sbin/iptables -t nat -I PREROUTING 1 -i "$IFACE" -p tcp --dport 80 -j DNAT --to-destination 10.42.0.1:8000 2>/dev/null || true
+        ;;
+    pre-down|down)
+        /usr/sbin/iptables -D INPUT -i "$IFACE" -p tcp --dport 8000 -j ACCEPT 2>/dev/null || true
+        /usr/sbin/iptables -t nat -D PREROUTING -i "$IFACE" -p tcp --dport 80 -j DNAT --to-destination 10.42.0.1:8000 2>/dev/null || true
+        ;;
+esac

@@ -11,10 +11,11 @@ class Frame:
     timestamp: float
 
 class CameraCapture:
-    def __init__(self, camera_id: int, device_index: int):
+    def __init__(self, camera_id: int, device_index: int, usb_id: str = ''):
         self.camera_id = camera_id
         self.device_index = device_index
         self.device_path = f"/dev/video{device_index}"
+        self.usb_id = usb_id
         self._cap: Optional[cv2.VideoCapture] = None
         self._frame: Optional[Frame] = None
         self._lock = threading.Lock()
@@ -42,14 +43,26 @@ class CameraCapture:
         return self._running and (self._cap is not None and self._cap.isOpened())
 
     def _capture_loop(self):
+        consecutive_failures = 0
         while self._running:
             if self._cap and self._cap.isOpened():
                 ret, frame = self._cap.read()
                 if ret:
+                    consecutive_failures = 0
                     with self._lock:
                         self._frame = Frame(
                             camera_id=self.camera_id,
                             data=frame,
                             timestamp=time.time()
                         )
+                else:
+                    consecutive_failures += 1
+                    if consecutive_failures >= 10:
+                        self._running = False
+                        break
+            else:
+                consecutive_failures += 1
+                if consecutive_failures >= 10:
+                    self._running = False
+                    break
             time.sleep(0.033)

@@ -87,16 +87,24 @@ def connect_to_network(ssid: str, password: str) -> bool:
     return success
 
 
+def _ap_profile_exists() -> bool:
+    raw = nmcli("-t", "-f", "NAME", "con", "show")
+    return any(line.strip() == "NomadEye-AP" for line in raw.splitlines())
+
+
 def start_access_point():
-    subprocess.run(["/usr/bin/nmcli", "con", "add", "type", "wifi", "ifname", "wlan0",
-                    "con-name", "NomadEye-AP", "autoconnect", "no",
-                    "ssid", cfg.ap_ssid], capture_output=True)
+    if not _ap_profile_exists():
+        subprocess.run(["/usr/bin/nmcli", "con", "add", "type", "wifi", "ifname", "wlan0",
+                        "con-name", "NomadEye-AP", "autoconnect", "no",
+                        "ssid", cfg.ap_ssid], capture_output=True)
     subprocess.run(["/usr/bin/nmcli", "con", "modify", "NomadEye-AP",
                     "802-11-wireless.mode", "ap",
                     "802-11-wireless-security.key-mgmt", "wpa-psk",
                     "802-11-wireless-security.psk", cfg.ap_password,
                     "ipv4.method", "shared"], capture_output=True)
-    subprocess.run(["/usr/bin/nmcli", "con", "up", "NomadEye-AP"], capture_output=True)
+    subprocess.run(["/usr/bin/nmcli", "con", "up", "NomadEye-AP"],
+                   capture_output=True, timeout=30)
+    _captive_up()
 
 
 def stop_access_point():
@@ -132,14 +140,18 @@ def is_connected() -> bool:
     return "connected" in result.stdout
 
 
+def is_ap_active() -> bool:
+    raw = nmcli("-t", "-f", "NAME,STATE", "con", "show", "--active")
+    return any("NomadEye-AP" in line for line in raw.splitlines())
+
+
 async def auto_connect_loop():
     while True:
-        if not is_connected():
+        if not is_connected() and not is_ap_active():
             known_ssids = {n["ssid"] for n in get_known_networks()}
             available = nmcli("-t", "-f", "SSID", "dev", "wifi", "list")
             for ssid in available.splitlines():
                 if ssid in known_ssids:
-                    # Re-activate the saved connection profile by name
                     subprocess.run(
                         ["/usr/bin/nmcli", "con", "up", ssid],
                         capture_output=True, timeout=30

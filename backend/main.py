@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
@@ -6,29 +7,51 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+from config.settings import get_settings as get_app_settings
 from models.database import init_db
 from detection.pipeline import DetectionPipeline
-from networking.manager import auto_connect_loop
+from notifications.queue import QueueProcessor
 from api.routes import cameras as cam_router
-from api.routes import cameras, detections, notifications, network, settings, auth, status
+from api.routes import cameras, detections, notifications, network, settings, auth, status, captive, setup
+from api.routes import storage
+from api.routes import system
+from storage.manager import auto_mount_primary
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
 
-    pipeline = DetectionPipeline([])
+    _cfg = get_app_settings()
+    db = sqlite3.connect(_cfg.db_path)
+    row = db.execute("SELECT value FROM app_config WHERE key='yolo_model'").fetchone()
+    initial_model = f"{row[0]}.pt" if row else "yolov8n.pt"
+    default_conf = _cfg.detection_confidence
+    conf_rows = db.execute(
+        "SELECT key, value FROM app_config WHERE key IN ('confidence_people','confidence_vehicles','confidence_animals','confidence_other')"
+    ).fetchall()
+    initial_confidences = {r[0].replace('confidence_', ''): float(r[1]) for r in conf_rows}
+    db.close()
+
+    pipeline = DetectionPipeline([], model_name=initial_model,
+                                 confidences=initial_confidences if initial_confidences else None)
     pipeline.start()
     cam_router.set_pipeline(pipeline)
+    settings.set_pipeline(pipeline)
+
+    queue_proc = QueueProcessor()
+    queue_proc.start()
+
+    # Mount primary external storage device if configured
+    auto_mount_primary()
 
     # Discover cameras on startup
     await cam_router.scan_and_refresh()
 
-    asyncio.create_task(auto_connect_loop())
-
     yield
 
     pipeline.stop()
+    queue_proc.stop()
     for cap in list(pipeline._cameras):
         cap.stop()
 
@@ -50,6 +73,10 @@ app.include_router(notifications.router, prefix="/api/notifications", tags=["not
 app.include_router(network.router, prefix="/api/network", tags=["network"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(status.router, prefix="/api/status", tags=["status"])
+app.include_router(captive.router)
+app.include_router(setup.router, prefix="/api/setup", tags=["setup"])
+app.include_router(storage.router, prefix="/api/storage", tags=["storage"])
+app.include_router(system.router, prefix="/api/system", tags=["system"])
 
 STATIC_DIR = Path(__file__).parent / "static"
 
