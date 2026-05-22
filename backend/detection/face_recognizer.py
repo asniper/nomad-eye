@@ -16,8 +16,8 @@ except ImportError:
 
 _MATCH_THRESHOLD_FR   = 0.55   # L2 distance: lower = stricter (face_recognition lib)
 _MATCH_THRESHOLD_HIST = 0.82   # cosine similarity: higher = stricter (OpenCV fallback)
-_MIN_FACE_PX = 20              # minimum face size in the DOWNSAMPLED image (≈80px at native 640px)
-_DETECTION_MAX_DIM = 160       # downsample to this max dim; 160px runs ~70x faster than 240px on RPi
+_MIN_FACE_PX = 40              # minimum face size in the DOWNSAMPLED image (≈80px at native 640px)
+_DETECTION_MAX_DIM = 320       # downsample to this max dim before HOG detection
 
 # Global semaphore: only one face-detection call at a time across all cameras.
 # Prevents concurrent dlib HOG calls from saturating all CPU cores.
@@ -40,6 +40,10 @@ class FaceRecognizer:
     # Internal DB sync
     # ------------------------------------------------------------------
     def _reload_from_db(self):
+        # Expected encoding length depends on backend:
+        # face_recognition (dlib) → 128-dim float64 = 1024 bytes
+        # opencv_haar            → 4096-dim float64 = 32768 bytes
+        expected_len = 128 if _HAS_FR else 4096
         try:
             db = sqlite3.connect(cfg.db_path, timeout=10)
             db.row_factory = sqlite3.Row
@@ -49,6 +53,8 @@ class FaceRecognizer:
             known = []
             for r in rows:
                 enc = np.frombuffer(bytes(r['encoding']), dtype=np.float64)
+                if enc.shape[0] != expected_len:
+                    continue  # skip encodings from a different backend (e.g. haar vs dlib)
                 known.append((r['id'], r['name'], enc, r['image_path']))
             db.close()
             with self._lock:
@@ -67,8 +73,8 @@ class FaceRecognizer:
     # ------------------------------------------------------------------
     def detect_and_recognize(self, frame: np.ndarray) -> list:
         """Returns list of Detection(label, category='faces', confidence, bbox)."""
-        if not _face_sem.acquire(blocking=False):
-            return []  # another camera is already running face detection; skip this frame
+        if not _face_sem.acquire(timeout=2.0):
+            return []  # other camera held the lock for too long; skip this frame
 
         try:
             h, w = frame.shape[:2]
@@ -90,7 +96,10 @@ class FaceRecognizer:
                 ]
 
             if self._min_confidence > 0:
-                results = [d for d in results if d.confidence >= self._min_confidence]
+                # Only filter RECOGNIZED faces below threshold — unknown faces always pass
+                # so they can be auto-saved and shown in the overlay.
+                results = [d for d in results
+                           if d.label == 'Unknown' or d.confidence >= self._min_confidence]
             return results
         finally:
             _face_sem.release()
@@ -122,7 +131,7 @@ class FaceRecognizer:
         with self._lock:
             known = list(self._known)
         if not known:
-            return 'Unknown', None, 0.0
+            return 'Unknown', None, 1.0  # face found; no known faces to compare against
         known_encs = [e for _, _, e, _ in known]
         distances = _fr.face_distance(known_encs, encoding)
         best = int(np.argmin(distances))

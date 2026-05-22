@@ -1,9 +1,9 @@
 import os
-# Cap OpenBLAS/OMP threads before any ML library imports to prevent spin-wait thread explosion.
-# dlib and PyTorch both default to N_CPU threads which saturates an ARM quad-core.
+# Limit BLAS threads used by dlib (via OpenBLAS) to prevent spin-wait thread explosion.
+# OMP_NUM_THREADS is intentionally NOT limited here — PyTorch needs multiple OMP threads
+# for YOLO inference speed. Only the BLAS layer (used by dlib) is capped.
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("BLIS_NUM_THREADS", "1")
 
 import asyncio
 import sqlite3

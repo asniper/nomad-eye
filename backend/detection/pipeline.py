@@ -20,7 +20,7 @@ cfg = get_settings()
 
 # Seconds of silence before a new detection is treated as a fresh event.
 # Prevents duplicate DB records and notification spam for the same continuous presence.
-COOLDOWN_SECS = 0.5      # how often YOLO runs while motion is present
+COOLDOWN_SECS = 3.0      # minimum gap between YOLO calls per camera while motion is present
 YOLO_TIMEOUT_SECS = 20  # skip a YOLO call if inference hasn't returned in this many seconds
 SCREENSHOT_INTERVAL = 5  # seconds between screenshots saved per active event
 EVENT_GAP = 30           # seconds of silence before an event is considered closed
@@ -30,6 +30,10 @@ STUCK_MOTION_SECS = 120     # auto-reset motion detector after N secs of continu
 _MOTION_OVERLAP_THRESHOLD = 0.02
 
 
+# Global semaphore: only one YOLO inference at a time across all cameras.
+# Two cameras running YOLO concurrently doubles thread contention on ARM cores.
+_yolo_sem = threading.Semaphore(1)
+
 def _detect_with_timeout(detector, frame):
     """Run detector.detect in a daemon thread; returns [] on timeout so the
     camera loop continues rather than blocking indefinitely on a stuck model."""
@@ -38,7 +42,8 @@ def _detect_with_timeout(detector, frame):
 
     def _worker():
         try:
-            result[0] = detector.detect(frame)
+            with _yolo_sem:
+                result[0] = detector.detect(frame)
         except Exception:
             result[0] = []
         done.set()
