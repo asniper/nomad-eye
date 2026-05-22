@@ -79,7 +79,9 @@ async def dispatch_notification(camera_id: int, detections: list, image_path: st
     camera_name = name_row["value"] if name_row else f"Camera {camera_id}"
 
     internal_url = f"http://{socket.gethostname()}"
-    ext_row = db.execute("SELECT value FROM app_config WHERE key='external_url'").fetchone()
+    ext_row = db.execute(
+        "SELECT value FROM app_config WHERE key IN ('external_url','app_base_url') ORDER BY key='external_url' DESC LIMIT 1"
+    ).fetchone()
     notification_url = ext_row["value"].rstrip("/") if (ext_row and ext_row["value"]) else internal_url
 
     tz_row = db.execute("SELECT value FROM app_config WHERE key='timezone'").fetchone()

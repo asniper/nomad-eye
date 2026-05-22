@@ -75,8 +75,22 @@ def _process_due_items():
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
 
+    # Purge queued items for disabled contacts or rules so they never fire.
+    db.execute(
+        """DELETE FROM notification_queue
+           WHERE contact_id IN (SELECT id FROM contacts WHERE active = 0)
+              OR rule_id IN (SELECT id FROM notification_rules WHERE active = 0)"""
+    )
+    db.commit()
+
     pending = db.execute(
-        "SELECT * FROM notification_queue WHERE scheduled_for <= ?", (now_iso,)
+        """SELECT nq.* FROM notification_queue nq
+           JOIN contacts c ON nq.contact_id = c.id
+           JOIN notification_rules nr ON nq.rule_id = nr.id
+           WHERE nq.scheduled_for <= ?
+             AND c.active = 1
+             AND nr.active = 1""",
+        (now_iso,)
     ).fetchall()
 
     if not pending:
@@ -84,7 +98,9 @@ def _process_due_items():
         return
 
     internal_url = f"http://{socket.gethostname()}"
-    ext_row = db.execute("SELECT value FROM app_config WHERE key='external_url'").fetchone()
+    ext_row = db.execute(
+        "SELECT value FROM app_config WHERE key IN ('external_url','app_base_url') ORDER BY key='external_url' DESC LIMIT 1"
+    ).fetchone()
     base_url = ext_row["value"].rstrip("/") if (ext_row and ext_row["value"]) else internal_url
     tz_row = db.execute("SELECT value FROM app_config WHERE key='timezone'").fetchone()
     tz_name = tz_row["value"] if tz_row else "UTC"
