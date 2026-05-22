@@ -1,4 +1,5 @@
 import cv2
+import numpy as np
 import time
 import uuid
 import threading
@@ -264,10 +265,25 @@ class DetectionPipeline:
                     last_yolo_ms, last_yolo_time, now)
 
                 if now > cooldown:
+                    # Crop to the bounding box of the motion region so YOLO
+                    # processes only the relevant area (faster on slow hardware).
+                    h, w = frame.shape[:2]
+                    ys, xs = np.where(motion_mask > 0)
+                    if len(xs) and len(ys):
+                        pad = 40
+                        cx1 = max(0, int(xs.min()) - pad)
+                        cy1 = max(0, int(ys.min()) - pad)
+                        cx2 = min(w, int(xs.max()) + pad)
+                        cy2 = min(h, int(ys.max()) + pad)
+                        crop = frame[cy1:cy2, cx1:cx2]
+                    else:
+                        cx1, cy1 = 0, 0
+                        crop = frame
+
                     t0 = time.time()
                     with self._lock:
                         detector = self._object_detector
-                    all_detections, timed_out = _detect_with_timeout(detector, frame)
+                    raw_detections, timed_out = _detect_with_timeout(detector, crop)
                     elapsed = time.time() - t0
                     if timed_out:
                         self._yolo_timeouts[cam.camera_id] = self._yolo_timeouts.get(cam.camera_id, 0) + 1
@@ -279,6 +295,12 @@ class DetectionPipeline:
                         continue
                     last_yolo_ms = round(elapsed * 1000)
                     last_yolo_time = now
+
+                    # Translate crop-relative coordinates back to full-frame coordinates.
+                    for d in raw_detections:
+                        x1, y1, x2, y2 = d.bbox
+                        d.bbox = (x1 + cx1, y1 + cy1, x2 + cx1, y2 + cy1)
+                    all_detections = raw_detections
 
                     detections = [d for d in all_detections if _bbox_has_motion(motion_mask, d.bbox)]
                     if detections:
