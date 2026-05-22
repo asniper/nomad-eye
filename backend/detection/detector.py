@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from dataclasses import dataclass
 from typing import List
@@ -33,15 +34,24 @@ class Detection:
 
 _CATEGORIES_LIST = ["people", "vehicles", "animals", "other"]
 
+def _resolve_model(model_name: str) -> str:
+    """Prefer yolov8n.onnx over yolov8n.pt when available — faster CPU inference."""
+    if model_name.endswith('.pt'):
+        onnx = model_name[:-3] + '.onnx'
+        here = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), onnx)
+        if os.path.exists(here):
+            return here
+    return model_name
+
 class ObjectDetector:
     def __init__(self, model_name: str = "yolov8n.pt", confidences: dict = None):
-        self._model = YOLO(model_name)
+        self._model = YOLO(_resolve_model(model_name))
         default = cfg.detection_confidence
         self._confidences = {c: confidences.get(c, default) if confidences else default
                              for c in _CATEGORIES_LIST}
 
     def reload(self, model_name: str):
-        self._model = YOLO(model_name)
+        self._model = YOLO(_resolve_model(model_name))
 
     def set_category_confidence(self, category: str, value: float):
         if category in self._confidences:
