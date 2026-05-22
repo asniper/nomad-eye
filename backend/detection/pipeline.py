@@ -19,7 +19,7 @@ cfg = get_settings()
 # Seconds of silence before a new detection is treated as a fresh event.
 # Prevents duplicate DB records and notification spam for the same continuous presence.
 COOLDOWN_SECS = 0.5      # how often YOLO runs while motion is present
-YOLO_TIMEOUT_SECS = 8   # skip a YOLO call if inference hasn't returned in this many seconds
+YOLO_TIMEOUT_SECS = 20  # skip a YOLO call if inference hasn't returned in this many seconds
 SCREENSHOT_INTERVAL = 5  # seconds between screenshots saved per active event
 EVENT_GAP = 30           # seconds of silence before an event is considered closed
 CLEAR_DETECTIONS_SECS = 5   # clear overlay N secs after motion stops completely
