@@ -49,7 +49,7 @@ class ObjectDetector:
 
     def detect(self, frame: np.ndarray) -> List[Detection]:
         min_conf = min(self._confidences.values())
-        results = self._model(frame, verbose=False, conf=min_conf, imgsz=160)[0]
+        results = self._model(frame, verbose=False, conf=min_conf, imgsz=224)[0]
         detections = []
         for box in results.boxes:
             label = results.names[int(box.cls)]

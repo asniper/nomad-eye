@@ -26,7 +26,7 @@ EVENT_GAP = 30           # seconds of silence before an event is considered clos
 CLEAR_DETECTIONS_SECS = 5   # clear overlay N secs after motion stops completely
 STUCK_MOTION_SECS = 120     # auto-reset motion detector after N secs of continuous motion
 
-_MOTION_OVERLAP_THRESHOLD = 0.05
+_MOTION_OVERLAP_THRESHOLD = 0.02
 
 
 def _detect_with_timeout(detector, frame):
@@ -87,6 +87,7 @@ class DetectionPipeline:
         self._debug_stats: dict = {}   # camera_id -> live AI debug dict
         self._auto_resets: dict = {}   # camera_id -> cumulative auto-reset count
         self._yolo_timeouts: dict = {} # camera_id -> cumulative timeout count
+        self._motion_bboxes: dict = {} # camera_id -> (x1,y1,x2,y2) of current motion region
 
     def start(self):
         self._running = True
@@ -137,6 +138,7 @@ class DetectionPipeline:
             self._active_events.pop(camera_id, None)
         self._last_motion_time.pop(camera_id, None)
         self._motion_start.pop(camera_id, None)
+        self._motion_bboxes.pop(camera_id, None)
         self._auto_resets.pop(camera_id, None)
         self._yolo_timeouts.pop(camera_id, None)
         self._debug_stats.pop(camera_id, None)
@@ -157,6 +159,7 @@ class DetectionPipeline:
             self._active_events.pop(camera_id, None)
         self._last_motion_time.pop(camera_id, None)
         self._motion_start.pop(camera_id, None)
+        self._motion_bboxes.pop(camera_id, None)
         self._auto_resets.pop(camera_id, None)
         self._yolo_timeouts.pop(camera_id, None)
         self._debug_stats.pop(camera_id, None)
@@ -203,6 +206,9 @@ class DetectionPipeline:
     def get_latest(self, camera_id: int):
         return self._latest_detections.get(camera_id)
 
+    def get_motion_bbox(self, camera_id: int):
+        return self._motion_bboxes.get(camera_id)
+
     def get_debug(self, camera_id: int) -> dict:
         return dict(self._debug_stats.get(camera_id, {}))
 
@@ -242,6 +248,19 @@ class DetectionPipeline:
                 self._last_motion_time[cam.camera_id] = now
                 motion_secs = now - self._motion_start[cam.camera_id]
 
+                # Update motion bounding box immediately so the stream can draw it
+                # before YOLO has had a chance to run.
+                h_f, w_f = frame.shape[:2]
+                ys_m, xs_m = np.where(motion_mask > 0)
+                if len(xs_m):
+                    pad_m = 20
+                    self._motion_bboxes[cam.camera_id] = (
+                        max(0, int(xs_m.min()) - pad_m),
+                        max(0, int(ys_m.min()) - pad_m),
+                        min(w_f, int(xs_m.max()) + pad_m),
+                        min(h_f, int(ys_m.max()) + pad_m),
+                    )
+
                 # Auto-reset if motion has been continuous for too long — background model is stuck
                 if motion_secs > STUCK_MOTION_SECS:
                     self._auto_resets[cam.camera_id] = self._auto_resets.get(cam.camera_id, 0) + 1
@@ -252,6 +271,7 @@ class DetectionPipeline:
                     motion_detector = self._detectors[cam.camera_id]
                     self._motion_start.pop(cam.camera_id, None)
                     self._last_motion_time.pop(cam.camera_id, None)
+                    self._motion_bboxes.pop(cam.camera_id, None)
                     cooldown = 0
                     self._debug_stats[cam.camera_id] = self._debug_snapshot(
                         cam.camera_id, 'idle', False, 0, 0, last_yolo_ms, None, now)
@@ -377,6 +397,7 @@ class DetectionPipeline:
                 if last and now - last > CLEAR_DETECTIONS_SECS:
                     self._latest_detections.pop(cam.camera_id, None)
                     self._last_motion_time.pop(cam.camera_id, None)
+                    self._motion_bboxes.pop(cam.camera_id, None)
                 self._debug_stats[cam.camera_id] = self._debug_snapshot(
                     cam.camera_id, 'idle', False, 0, 0, last_yolo_ms, last_yolo_time, now)
 

@@ -315,14 +315,22 @@ async def stream(websocket: WebSocket, camera_id: int):
                 frame = frame_obj.data.copy()
                 if _pipeline._overlay_enabled.get(camera_id):
                     detections = _pipeline.get_latest(camera_id) or []
-                    for d in detections:
-                        if d.category in hidden_categories:
-                            continue
-                        x1, y1, x2, y2 = d.bbox
-                        color = CATEGORY_COLORS_BGR.get(d.category, (128, 128, 128))
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                        cv2.putText(frame, f"{d.label} {d.confidence:.0%}", (x1, y1 - 8),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                    if detections:
+                        for d in detections:
+                            if d.category in hidden_categories:
+                                continue
+                            x1, y1, x2, y2 = d.bbox
+                            color = CATEGORY_COLORS_BGR.get(d.category, (128, 128, 128))
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                            cv2.putText(frame, f"{d.label} {d.confidence:.0%}", (x1, y1 - 8),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                    else:
+                        # No YOLO result yet — draw the raw motion region immediately
+                        # so there's instant visual feedback before classification finishes.
+                        mbbox = _pipeline.get_motion_bbox(camera_id)
+                        if mbbox:
+                            x1, y1, x2, y2 = mbbox
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), (200, 200, 200), 1)
                 _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
                 try:
                     await websocket.send_bytes(buf.tobytes())
