@@ -145,7 +145,8 @@ export default function Detections() {
   const [camFilter, setCamFilter] = useState('')
   const [labelFilter, setLabelFilter] = useState('')
   const [page, setPage] = useState(1)
-  const [hasMore, setHasMore] = useState(false)
+  const [total, setTotal] = useState(0)
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   const load = useCallback((p) => {
     setLoading(true)
@@ -154,7 +155,7 @@ export default function Detections() {
     if (camFilter) params.camera_id = parseInt(camFilter)
     if (labelFilter) params.label = labelFilter
     detections.events(params)
-      .then(r => { setEvents(r.data); setHasMore(r.data.length === PAGE_SIZE) })
+      .then(r => { setEvents(r.data.events); setTotal(r.data.total) })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [category, camFilter, labelFilter])
@@ -231,7 +232,7 @@ export default function Detections() {
           <EventRow key={ev.event_id} ev={ev} cameraNames={cameraNames} />
         ))}
 
-        {!loading && (
+        {!loading && totalPages > 0 && (
           <div className="flex items-center justify-between mt-4 pt-4 border-t border-[#3A3A3A]">
             <button
               onClick={() => setPage(p => Math.max(1, p - 1))}
@@ -240,10 +241,33 @@ export default function Detections() {
             >
               Previous
             </button>
-            <span className="text-xs text-gray-500">Page {page}</span>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter(n => n === 1 || n === totalPages || Math.abs(n - page) <= 2)
+                .reduce((acc, n, idx, arr) => {
+                  if (idx > 0 && n - arr[idx - 1] > 1) acc.push('…')
+                  acc.push(n)
+                  return acc
+                }, [])
+                .map((n, idx) => n === '…' ? (
+                  <span key={`ellipsis-${idx}`} className="text-xs text-gray-600 px-1">…</span>
+                ) : (
+                  <button
+                    key={n}
+                    onClick={() => setPage(n)}
+                    className="w-7 h-7 rounded text-xs font-medium transition-colors"
+                    style={n === page
+                      ? { background: '#FFB800', color: '#151925' }
+                      : { background: '#3A3A3A', color: '#9CA3AF' }
+                    }
+                  >
+                    {n}
+                  </button>
+                ))}
+            </div>
             <button
-              onClick={() => setPage(p => p + 1)}
-              disabled={!hasMore}
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
               className="px-3 py-1 rounded-md text-xs bg-[#3A3A3A] text-gray-300 hover:bg-[#484848] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               Next

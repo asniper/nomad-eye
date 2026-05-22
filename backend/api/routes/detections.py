@@ -74,6 +74,19 @@ def list_events(
     if label:
         query += " AND label = ?"
         params.append(label)
+    count_query = "SELECT COUNT(DISTINCT event_id) FROM detections WHERE event_id IS NOT NULL"
+    count_params = []
+    if camera_id is not None:
+        count_query += " AND camera_id = ?"
+        count_params.append(camera_id)
+    if category:
+        count_query += " AND category = ?"
+        count_params.append(category)
+    if label:
+        count_query += " AND label = ?"
+        count_params.append(label)
+    total = db.execute(count_query, count_params).fetchone()[0]
+
     query += " GROUP BY event_id ORDER BY MAX(timestamp) DESC LIMIT ? OFFSET ?"
     params += [limit, offset]
     rows = db.execute(query, params).fetchall()
@@ -83,7 +96,7 @@ def list_events(
         ids = row.pop("detection_ids", "") or ""
         row["detection_ids"] = [int(x) for x in ids.split(",") if x]
         result.append(row)
-    return result
+    return {"events": result, "total": total}
 
 
 @router.get("/events/{event_id}")
