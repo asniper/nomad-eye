@@ -16,7 +16,7 @@ except ImportError:
 
 _MATCH_THRESHOLD_FR   = 0.55   # L2 distance: lower = stricter (face_recognition lib)
 _MATCH_THRESHOLD_HIST = 0.82   # cosine similarity: higher = stricter (OpenCV fallback)
-_MIN_FACE_PX = 60              # ignore faces smaller than this in either dimension
+_MIN_FACE_PX = 80              # ignore faces smaller than this in either dimension
 
 cfg = get_settings()
 
@@ -106,7 +106,7 @@ class FaceRecognizer:
         from detection.detector import Detection
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = self._cascade.detectMultiScale(
-            gray, scaleFactor=1.1, minNeighbors=5,
+            gray, scaleFactor=1.2, minNeighbors=8,
             minSize=(_MIN_FACE_PX, _MIN_FACE_PX))
         if not isinstance(faces, np.ndarray) or len(faces) == 0:
             return []
