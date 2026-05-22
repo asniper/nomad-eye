@@ -16,7 +16,12 @@ except ImportError:
 
 _MATCH_THRESHOLD_FR   = 0.55   # L2 distance: lower = stricter (face_recognition lib)
 _MATCH_THRESHOLD_HIST = 0.82   # cosine similarity: higher = stricter (OpenCV fallback)
-_MIN_FACE_PX = 80              # ignore faces smaller than this in either dimension
+_MIN_FACE_PX = 20              # minimum face size in the DOWNSAMPLED image (≈80px at native 640px)
+_DETECTION_MAX_DIM = 160       # downsample to this max dim; 160px runs ~70x faster than 240px on RPi
+
+# Global semaphore: only one face-detection call at a time across all cameras.
+# Prevents concurrent dlib HOG calls from saturating all CPU cores.
+_face_sem = threading.Semaphore(1)
 
 cfg = get_settings()
 
@@ -62,10 +67,33 @@ class FaceRecognizer:
     # ------------------------------------------------------------------
     def detect_and_recognize(self, frame: np.ndarray) -> list:
         """Returns list of Detection(label, category='faces', confidence, bbox)."""
-        results = self._detect_fr(frame) if _HAS_FR else self._detect_opencv(frame)
-        if self._min_confidence > 0:
-            results = [d for d in results if d.confidence >= self._min_confidence]
-        return results
+        if not _face_sem.acquire(blocking=False):
+            return []  # another camera is already running face detection; skip this frame
+
+        try:
+            h, w = frame.shape[:2]
+            scale = min(1.0, _DETECTION_MAX_DIM / max(h, w, 1))
+            if scale < 1.0:
+                small = cv2.resize(frame, (int(w * scale), int(h * scale)))
+            else:
+                small = frame
+
+            results = self._detect_fr(small) if _HAS_FR else self._detect_opencv(small)
+
+            if scale < 1.0:
+                from detection.detector import Detection
+                inv = 1.0 / scale
+                results = [
+                    Detection(label=d.label, category='faces', confidence=d.confidence,
+                              bbox=tuple(int(v * inv) for v in d.bbox))
+                    for d in results
+                ]
+
+            if self._min_confidence > 0:
+                results = [d for d in results if d.confidence >= self._min_confidence]
+            return results
+        finally:
+            _face_sem.release()
 
     # ------------------------------------------------------------------
     # face_recognition (dlib) path

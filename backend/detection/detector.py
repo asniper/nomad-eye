@@ -2,6 +2,8 @@ import os
 import numpy as np
 from dataclasses import dataclass
 from typing import List
+import torch
+torch.set_num_threads(1)   # prevent PyTorch from spawning N-core worker threads
 from ultralytics import YOLO
 from config.settings import get_settings
 

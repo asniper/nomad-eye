@@ -91,6 +91,7 @@ class DetectionPipeline:
         self._yolo_timeouts: dict = {} # camera_id -> cumulative timeout count
         self._motion_bboxes: dict = {} # camera_id -> (x1,y1,x2,y2) of current motion region
         self._enabled_categories: set = {'people', 'vehicles', 'animals', 'other', 'faces'}
+        self._face_last_run: dict = {}   # camera_id -> timestamp of last face detection
 
     def start(self):
         self._running = True
@@ -306,11 +307,14 @@ class DetectionPipeline:
                         detector = self._object_detector
                         face_rec = self._face_recognizer
 
-                    # Run face recognition in parallel with YOLO (only if enabled)
+                    # Run face recognition in parallel with YOLO (only if enabled and not rate-limited)
+                    FACE_COOLDOWN_SECS = 10.0
                     face_result: list = []
                     face_done = threading.Event()
                     faces_enabled = 'faces' in self._enabled_categories
-                    if faces_enabled:
+                    face_due = now - self._face_last_run.get(cam.camera_id, 0) >= FACE_COOLDOWN_SECS
+                    if faces_enabled and face_due:
+                        self._face_last_run[cam.camera_id] = now
                         def _face_work(fr=face_rec, f=frame):
                             try:
                                 face_result.extend(fr.detect_and_recognize(f))
