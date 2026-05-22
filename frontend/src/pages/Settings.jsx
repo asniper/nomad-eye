@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
-import { settings, detections as detectionsApi, storage as storageApi, system as systemApi } from '../api/client'
+import { settings, detections as detectionsApi, storage as storageApi, system as systemApi, cameras as camerasApi } from '../api/client'
 import { useAuth } from '../hooks/useAuth'
 import { useDeviceStatus } from '../context/DeviceStatusContext'
 import { setTimezone } from '../utils/dates'
@@ -59,6 +59,13 @@ export default function Settings() {
   const [saved, setSaved] = useState({})
   const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'general')
 
+  const changeTab = useCallback((id) => {
+    setTab(id)
+    const url = new URL(window.location)
+    url.searchParams.set('tab', id)
+    window.history.pushState({}, '', url)
+  }, [])
+
   useEffect(() => {
     settings.getAll().then(r => {
       const s = r.data || {}
@@ -89,7 +96,7 @@ export default function Settings() {
           {TABS.map(t => (
             <button
               key={t.id}
-              onClick={() => setTab(t.id)}
+              onClick={() => changeTab(t.id)}
               className="px-4 py-1.5 text-sm font-medium transition-colors rounded-t-md"
               style={tab === t.id
                 ? { color: '#FFB800', borderBottom: '2px solid #FFB800', marginBottom: '-1px' }
@@ -247,6 +254,8 @@ export default function Settings() {
         </SettingRow>
       </Card>
 
+      <CamerasCard />
+
       <Card title="Account">
         <SettingRow label="Sign out" hint="You will be returned to the login screen.">
           <button
@@ -260,6 +269,98 @@ export default function Settings() {
 
       </>}
     </div>
+  )
+}
+
+function CamerasCard() {
+  const [cams, setCams] = useState(null)
+  const [confirm, setConfirm] = useState(null) // camera_id being confirmed for delete
+  const [deleting, setDeleting] = useState(null)
+
+  const load = useCallback(() => {
+    camerasApi.list().then(r => setCams(r.data)).catch(() => setCams([]))
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const handleDelete = async (id) => {
+    if (confirm !== id) { setConfirm(id); return }
+    setDeleting(id)
+    try {
+      await camerasApi.deletePermanent(id)
+      load()
+    } catch {}
+    setDeleting(null)
+    setConfirm(null)
+  }
+
+  if (!cams) return null
+
+  return (
+    <Card title="Cameras">
+      <p className="text-xs text-gray-500 mb-3">All cameras ever connected. Offline cameras can be permanently deleted.</p>
+      {cams.length === 0 && <p className="text-sm text-gray-500">No cameras registered yet.</p>}
+      <div className="space-y-0">
+        {cams.map(cam => {
+          const isOffline = !cam.alive
+          const isConfirming = confirm === cam.id
+          const isDeleting = deleting === cam.id
+          return (
+            <div key={cam.id} className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 py-3 border-b border-[#3A3A3A] last:border-0">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium text-white">{cam.name || `Camera ${cam.id}`}</span>
+                  <span
+                    className="text-xs px-1.5 py-0.5 rounded-full"
+                    style={cam.alive
+                      ? { background: 'rgba(34,197,94,0.15)', color: '#4ADE80' }
+                      : { background: 'rgba(156,163,175,0.15)', color: '#6B7280' }
+                    }
+                  >
+                    {cam.alive ? 'Online' : 'Offline'}
+                  </span>
+                  <span className="text-xs text-gray-500">{cam.event_count} event{cam.event_count !== 1 ? 's' : ''}</span>
+                </div>
+                <p className="text-xs text-gray-600 font-mono mt-0.5 truncate">
+                  {cam.device || cam.usb_id?.replace(/-video-index\d+$/, '') || '—'}
+                </p>
+                {cam.last_seen && isOffline && (
+                  <p className="text-xs text-gray-700 mt-0.5">Last seen {new Date(cam.last_seen).toLocaleString()}</p>
+                )}
+              </div>
+              {isOffline && (
+                <div className="flex items-center gap-2 shrink-0">
+                  {isConfirming ? (
+                    <>
+                      <span className="text-xs text-gray-400">Delete {cam.event_count} event{cam.event_count !== 1 ? 's' : ''}?</span>
+                      <button
+                        onClick={() => handleDelete(cam.id)}
+                        disabled={isDeleting}
+                        className="px-3 py-1 text-xs rounded-md transition-colors disabled:opacity-50"
+                        style={{ background: '#EF4444', color: '#fff' }}
+                      >
+                        {isDeleting ? 'Deleting…' : 'Confirm Delete'}
+                      </button>
+                      <button onClick={() => setConfirm(null)} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => handleDelete(cam.id)}
+                      className="px-3 py-1 text-xs rounded-md transition-colors"
+                      style={{ background: '#3A3A3A', color: '#F87171' }}
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </Card>
   )
 }
 

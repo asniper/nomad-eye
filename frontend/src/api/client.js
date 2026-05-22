@@ -18,6 +18,7 @@ export const cameras = {
   toggleOverlay: (id, enabled) => api.post(`/cameras/${id}/overlay?enabled=${enabled}`),
   setName: (id, name) => api.patch(`/cameras/${id}/name`, { name }),
   remove: (id) => api.delete(`/cameras/${id}`),
+  deletePermanent: (id) => api.delete(`/cameras/${id}/permanent`),
   reload: (id) => api.post(`/cameras/${id}/reload`),
   resetTracking: (id) => api.post(`/cameras/${id}/reset-tracking`),
 }

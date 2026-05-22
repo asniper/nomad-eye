@@ -10,6 +10,7 @@ from camera.capture import CameraCapture
 from detection.detector import CATEGORY_COLORS_BGR
 from models.database import get_db
 from config.settings import get_settings
+from datetime import datetime, timezone
 
 router = APIRouter()
 
@@ -50,13 +51,16 @@ def _get_usb_id(video_path: str) -> str:
 def _get_or_create_camera_id(db: sqlite3.Connection, usb_id: str) -> int:
     """Look up usb_id in the cameras table; insert with next available ID if new."""
     row = db.execute("SELECT camera_id FROM cameras WHERE usb_id=?", (usb_id,)).fetchone()
+    now = datetime.now(timezone.utc).isoformat()
     if row:
+        db.execute("UPDATE cameras SET last_seen=? WHERE usb_id=?", (now, usb_id))
+        db.commit()
         return row['camera_id']
     existing = {r['camera_id'] for r in db.execute("SELECT camera_id FROM cameras").fetchall()}
     cam_id = next(i for i in range(1000) if i not in existing)
     db.execute(
-        "INSERT INTO cameras (camera_id, usb_id, created_at) VALUES (?,?,datetime('now'))",
-        (cam_id, usb_id),
+        "INSERT INTO cameras (camera_id, usb_id, created_at, last_seen) VALUES (?,?,datetime('now'),?)",
+        (cam_id, usb_id, now),
     )
     db.commit()
     return cam_id
@@ -71,21 +75,6 @@ def _probe_device(path: str) -> bool:
     return ret
 
 
-def _get_names(db: sqlite3.Connection) -> dict:
-    rows = db.execute(
-        "SELECT key, value FROM app_config WHERE key LIKE 'camera_name_%'"
-    ).fetchall()
-    return {int(row['key'].replace('camera_name_', '')): row['value'] for row in rows}
-
-
-def _cam_dict(cam, names: dict) -> dict:
-    return {
-        "id": cam.camera_id,
-        "alive": cam.is_alive(),
-        "device": cam.device_path,
-        "usb_id": cam.usb_id,
-        "name": names.get(cam.camera_id, ''),
-    }
 
 
 async def scan_and_refresh(db: sqlite3.Connection = None) -> list:
@@ -143,11 +132,35 @@ async def scan_and_refresh(db: sqlite3.Connection = None) -> list:
 
 @router.get("/")
 def list_cameras(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
-    if _pipeline is None:
-        return []
-    names = _get_names(db)
-    with _pipeline._lock:
-        return [_cam_dict(cam, names) for cam in _pipeline._cameras]
+    db_cams = db.execute(
+        "SELECT camera_id, usb_id, name, last_seen FROM cameras ORDER BY camera_id"
+    ).fetchall()
+    event_counts = {
+        r['camera_id']: r['cnt']
+        for r in db.execute(
+            "SELECT camera_id, COUNT(DISTINCT event_id) as cnt FROM detections "
+            "WHERE event_id IS NOT NULL GROUP BY camera_id"
+        ).fetchall()
+    }
+    live = {}
+    if _pipeline is not None:
+        with _pipeline._lock:
+            for cam in _pipeline._cameras:
+                live[cam.camera_id] = cam
+    result = []
+    for row in db_cams:
+        cam_id = row['camera_id']
+        live_cam = live.get(cam_id)
+        result.append({
+            "id": cam_id,
+            "alive": live_cam.is_alive() if live_cam else False,
+            "device": live_cam.device_path if live_cam else None,
+            "usb_id": row['usb_id'],
+            "name": row['name'] or '',
+            "last_seen": row['last_seen'],
+            "event_count": event_counts.get(cam_id, 0),
+        })
+    return result
 
 
 @router.post("/refresh")
@@ -164,17 +177,14 @@ def set_camera_name(
     db: sqlite3.Connection = Depends(get_db),
     _=Depends(require_auth),
 ):
-    db.execute(
-        "INSERT OR REPLACE INTO app_config (key, value) VALUES (?,?)",
-        (f"camera_name_{camera_id}", body.name.strip()),
-    )
+    db.execute("UPDATE cameras SET name=? WHERE camera_id=?", (body.name.strip(), camera_id))
     db.commit()
     return {"camera_id": camera_id, "name": body.name.strip()}
 
 
 @router.delete("/{camera_id}")
 def remove_camera(camera_id: int, _=Depends(require_auth)):
-    """Manually remove a camera from the pipeline (use to clean up stale entries)."""
+    """Remove a camera from the active pipeline (keeps DB record and events)."""
     if _pipeline is None:
         return {"ok": False}
     with _pipeline._lock:
@@ -185,6 +195,40 @@ def remove_camera(camera_id: int, _=Depends(require_auth)):
             _pipeline._detectors.pop(camera_id, None)
             _pipeline._latest_detections.pop(camera_id, None)
             _pipeline._overlay_enabled.pop(camera_id, None)
+    return {"ok": True}
+
+
+@router.delete("/{camera_id}/permanent")
+def delete_camera_permanently(
+    camera_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Permanently delete a camera and all its detection events and images."""
+    if _pipeline is not None:
+        with _pipeline._lock:
+            cam = next((c for c in _pipeline._cameras if c.camera_id == camera_id), None)
+            if cam:
+                cam.stop()
+                _pipeline._cameras.remove(cam)
+                _pipeline._detectors.pop(camera_id, None)
+                _pipeline._latest_detections.pop(camera_id, None)
+                _pipeline._overlay_enabled.pop(camera_id, None)
+                _pipeline._active_events.pop(camera_id, None)
+    rows = db.execute(
+        "SELECT image_path FROM detections WHERE camera_id=? AND image_path IS NOT NULL",
+        (camera_id,)
+    ).fetchall()
+    for row in rows:
+        try:
+            if os.path.exists(row['image_path']):
+                os.remove(row['image_path'])
+        except OSError:
+            pass
+    db.execute("DELETE FROM detections WHERE camera_id=?", (camera_id,))
+    db.execute("DELETE FROM cameras WHERE camera_id=?", (camera_id,))
+    db.execute("DELETE FROM app_config WHERE key=?", (f"camera_name_{camera_id}",))
+    db.commit()
     return {"ok": True}
 
 
@@ -218,7 +262,7 @@ async def stream(websocket: WebSocket, camera_id: int):
         await websocket.close()
         return
     cam = next((c for c in _pipeline._cameras if c.camera_id == camera_id), None)
-    if not cam:
+    if not cam or not cam.is_alive():
         await websocket.close()
         return
 
@@ -242,6 +286,8 @@ async def stream(websocket: WebSocket, camera_id: int):
     reader = asyncio.create_task(read_client())
     try:
         while True:
+            if not cam.is_alive():
+                break
             frame_obj = cam.get_frame()
             if frame_obj is not None:
                 frame = frame_obj.data.copy()

@@ -127,6 +127,8 @@ def init_db():
     db.commit()
 
     for migration in [
+        "ALTER TABLE cameras ADD COLUMN name TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE cameras ADD COLUMN last_seen TEXT",
         "ALTER TABLE detections ADD COLUMN event_id TEXT",
         "ALTER TABLE contacts ADD COLUMN carrier TEXT",
         "ALTER TABLE notification_log ADD COLUMN message TEXT",
@@ -139,4 +141,16 @@ def init_db():
             db.commit()
         except sqlite3.OperationalError:
             pass
+    # Migrate camera names from app_config into cameras.name (one-time, safe to re-run)
+    try:
+        db.execute("""
+            UPDATE cameras SET name = (
+                SELECT value FROM app_config WHERE key = 'camera_name_' || cameras.camera_id
+            ) WHERE name = '' AND EXISTS (
+                SELECT 1 FROM app_config WHERE key = 'camera_name_' || cameras.camera_id
+            )
+        """)
+        db.commit()
+    except Exception:
+        pass
     db.close()

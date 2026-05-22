@@ -37,6 +37,10 @@ class CameraCapture:
 
     def get_frame(self) -> Optional[Frame]:
         with self._lock:
+            if self._frame is None:
+                return None
+            if time.time() - self._frame.timestamp > 2.0:
+                return None  # stale — camera disconnected or frozen
             return self._frame
 
     def is_alive(self) -> bool:

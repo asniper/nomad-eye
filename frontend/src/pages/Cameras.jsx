@@ -367,14 +367,11 @@ export default function Cameras() {
               <div key={cam.id} className="bg-[#2E2E2E] rounded-xl p-4 border border-[#3A3A3A] flex items-center justify-between gap-4">
                 <div>
                   <p className="text-sm font-medium text-white">{cam.name || `Camera ${cam.id}`}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{cam.device} — disconnected</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {cam.device ? `${cam.device} — ` : ''}{cam.usb_id?.replace(/-video-index\d+$/, '') || 'Unknown device'} — disconnected
+                  </p>
+                  {cam.last_seen && <p className="text-xs text-gray-700 mt-0.5">Last seen {new Date(cam.last_seen).toLocaleString()}</p>}
                 </div>
-                <button
-                  onClick={() => handleRemove(cam.id)}
-                  className="px-3 py-1.5 text-xs rounded-md bg-[#3A3A3A] hover:bg-red-500/20 hover:text-red-400 text-gray-400 transition-colors"
-                >
-                  Remove
-                </button>
               </div>
             )
         ))}
