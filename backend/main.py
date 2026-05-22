@@ -33,10 +33,13 @@ async def lifespan(app: FastAPI):
         "SELECT key, value FROM app_config WHERE key IN ('confidence_people','confidence_vehicles','confidence_animals','confidence_other')"
     ).fetchall()
     initial_confidences = {r[0].replace('confidence_', ''): float(r[1]) for r in conf_rows}
+    face_conf_row = db.execute("SELECT value FROM app_config WHERE key='confidence_faces'").fetchone()
+    initial_face_confidence = float(face_conf_row[0]) if face_conf_row else 0.0
     db.close()
 
     pipeline = DetectionPipeline([], model_name=initial_model,
                                  confidences=initial_confidences if initial_confidences else None)
+    pipeline.set_face_confidence(initial_face_confidence)
     pipeline.start()
     cam_router.set_pipeline(pipeline)
     settings.set_pipeline(pipeline)

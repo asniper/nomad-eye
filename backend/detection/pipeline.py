@@ -131,6 +131,9 @@ class DetectionPipeline:
         """Re-sync face recognizer's in-memory known faces from DB."""
         self._face_recognizer.reload()
 
+    def set_face_confidence(self, value: float):
+        self._face_recognizer.set_min_confidence(value)
+
     def set_category_confidence(self, category: str, value: float):
         with self._lock:
             self._object_detector.set_category_confidence(category, value)

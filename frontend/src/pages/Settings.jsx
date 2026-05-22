@@ -1190,6 +1190,7 @@ const CONF_CATEGORIES = [
   { key: 'confidence_people',   label: 'People',   color: '#F87171' },
   { key: 'confidence_vehicles', label: 'Vehicles', color: '#60A5FA' },
   { key: 'confidence_animals',  label: 'Animals',  color: '#4ADE80' },
+  { key: 'confidence_faces',    label: 'Faces',    color: '#A855F7' },
   { key: 'confidence_other',    label: 'Other',    color: '#FCD34D' },
 ]
 

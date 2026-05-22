@@ -25,6 +25,7 @@ class FaceRecognizer:
     def __init__(self):
         self._lock = threading.Lock()
         self._known: list = []  # [(face_id, name, encoding_ndarray, image_path)]
+        self._min_confidence: float = 0.0
         if not _HAS_FR:
             cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
             self._cascade = cv2.CascadeClassifier(cascade_path)
@@ -53,14 +54,18 @@ class FaceRecognizer:
     def reload(self):
         self._reload_from_db()
 
+    def set_min_confidence(self, value: float):
+        self._min_confidence = max(0.0, min(1.0, value))
+
     # ------------------------------------------------------------------
     # Public: detect + recognize faces, returns Detection-compatible list
     # ------------------------------------------------------------------
     def detect_and_recognize(self, frame: np.ndarray) -> list:
         """Returns list of Detection(label, category='faces', confidence, bbox)."""
-        if _HAS_FR:
-            return self._detect_fr(frame)
-        return self._detect_opencv(frame)
+        results = self._detect_fr(frame) if _HAS_FR else self._detect_opencv(frame)
+        if self._min_confidence > 0:
+            results = [d for d in results if d.confidence >= self._min_confidence]
+        return results
 
     # ------------------------------------------------------------------
     # face_recognition (dlib) path
