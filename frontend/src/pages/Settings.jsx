@@ -527,14 +527,13 @@ function FaceCard({ face, editing, editName, setEditName, saving, confirming, de
   return (
     <div className="rounded-lg overflow-hidden" style={{ background: '#2A2A2A', border: '1px solid #3A3A3A' }}>
       <div className="relative aspect-square bg-[#1E1E1E]">
-        {imgUrl && (
+        {imgUrl ? (
           <img
             src={imgUrl}
             alt={face.name}
             className="w-full h-full object-cover"
           />
-        )}
-        {isUnknown && (
+        ) : (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="w-12 h-12 rounded-full flex items-center justify-center"
               style={{ background: 'rgba(168,85,247,0.2)', border: '1px solid rgba(168,85,247,0.4)' }}>
