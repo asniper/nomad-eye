@@ -126,6 +126,17 @@ def init_db():
     """)
     db.commit()
 
+    cursor.executescript("""
+        CREATE TABLE IF NOT EXISTS known_faces (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL DEFAULT 'Unknown',
+            encoding BLOB NOT NULL,
+            image_path TEXT,
+            created_at TEXT NOT NULL
+        );
+    """)
+    db.commit()
+
     for migration in [
         "ALTER TABLE cameras ADD COLUMN name TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE cameras ADD COLUMN last_seen TEXT",

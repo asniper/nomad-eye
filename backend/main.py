@@ -15,6 +15,8 @@ from api.routes import cameras as cam_router
 from api.routes import cameras, detections, notifications, network, settings, auth, status, captive, setup
 from api.routes import storage
 from api.routes import system
+from api.routes import faces as faces_router
+from api.routes import faces
 from storage.manager import auto_mount_primary
 
 
@@ -38,6 +40,7 @@ async def lifespan(app: FastAPI):
     pipeline.start()
     cam_router.set_pipeline(pipeline)
     settings.set_pipeline(pipeline)
+    faces_router.set_pipeline(pipeline)
 
     queue_proc = QueueProcessor()
     queue_proc.start()
@@ -77,6 +80,7 @@ app.include_router(captive.router)
 app.include_router(setup.router, prefix="/api/setup", tags=["setup"])
 app.include_router(storage.router, prefix="/api/storage", tags=["storage"])
 app.include_router(system.router, prefix="/api/system", tags=["system"])
+app.include_router(faces.router, prefix="/api/faces", tags=["faces"])
 
 STATIC_DIR = Path(__file__).parent / "static"
 

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
-import { settings, detections as detectionsApi, storage as storageApi, system as systemApi, cameras as camerasApi } from '../api/client'
+import { settings, detections as detectionsApi, storage as storageApi, system as systemApi, cameras as camerasApi, faces as facesApi } from '../api/client'
 import { useAuth } from '../hooks/useAuth'
 import { useDeviceStatus } from '../context/DeviceStatusContext'
 import { setTimezone } from '../utils/dates'
@@ -46,6 +46,7 @@ function SettingRow({ label, hint, children }) {
 
 const TABS = [
   { id: 'general', label: 'General' },
+  { id: 'faces', label: 'Faces' },
   { id: 'network', label: 'Network' },
   { id: 'storage', label: 'Storage & System' },
 ]
@@ -111,6 +112,7 @@ export default function Settings() {
 
       {tab === 'network' && <Network />}
       {tab === 'storage' && <StorageTab />}
+      {tab === 'faces' && <FacesTab />}
 
       {tab === 'general' && <>
 
@@ -361,6 +363,232 @@ function CamerasCard() {
         })}
       </div>
     </Card>
+  )
+}
+
+function FacesTab() {
+  return (
+    <div className="space-y-6">
+      <FacesCard />
+    </div>
+  )
+}
+
+function FacesCard() {
+  const [faces, setFaces] = useState(null)
+  const [editing, setEditing] = useState(null)    // face id being renamed
+  const [editName, setEditName] = useState('')
+  const [saving, setSaving] = useState(null)
+  const [confirm, setConfirm] = useState(null)    // face id pending delete
+  const [deleting, setDeleting] = useState(null)
+  const [clearingUnknown, setClearingUnknown] = useState(false)
+  const [backend, setBackend] = useState(null)
+
+  const load = useCallback(() => {
+    facesApi.list().then(r => setFaces(r.data)).catch(() => setFaces([]))
+    facesApi.backend().then(r => setBackend(r.data.backend)).catch(() => {})
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const startEdit = (face) => {
+    setEditing(face.id)
+    setEditName(face.name)
+    setConfirm(null)
+  }
+
+  const saveEdit = async (id) => {
+    if (!editName.trim()) return
+    setSaving(id)
+    try {
+      await facesApi.rename(id, editName.trim())
+      setFaces(f => f.map(x => x.id === id ? { ...x, name: editName.trim() } : x))
+      setEditing(null)
+    } catch {}
+    setSaving(null)
+  }
+
+  const handleDelete = async (id) => {
+    if (confirm !== id) { setConfirm(id); return }
+    setDeleting(id)
+    try {
+      await facesApi.delete(id)
+      setFaces(f => f.filter(x => x.id !== id))
+    } catch {}
+    setDeleting(null)
+    setConfirm(null)
+  }
+
+  const clearUnknown = async () => {
+    setClearingUnknown(true)
+    try {
+      await facesApi.deleteUnknown()
+      load()
+    } catch {}
+    setClearingUnknown(false)
+  }
+
+  const unknown = faces ? faces.filter(f => f.name === 'Unknown') : []
+  const known = faces ? faces.filter(f => f.name !== 'Unknown') : []
+
+  return (
+    <Card title="Faces">
+      <div className="mb-4 flex items-center gap-3 flex-wrap">
+        <p className="text-sm text-gray-400 flex-1">
+          Faces are detected automatically and saved here. Label them to recognize them in future detections.
+        </p>
+        {backend && (
+          <span className="text-xs px-2 py-0.5 rounded-full"
+            style={{ background: 'rgba(168,85,247,0.15)', color: '#C084FC' }}>
+            {backend === 'face_recognition' ? 'dlib (high accuracy)' : 'OpenCV Haar (basic)'}
+          </span>
+        )}
+      </div>
+
+      {faces === null && <p className="text-sm text-gray-500">Loading…</p>}
+      {faces !== null && faces.length === 0 && (
+        <p className="text-sm text-gray-500">No faces captured yet. Faces will appear here automatically when detected.</p>
+      )}
+
+      {known.length > 0 && (
+        <div className="mb-6">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Known</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            {known.map(face => (
+              <FaceCard
+                key={face.id}
+                face={face}
+                editing={editing === face.id}
+                editName={editName}
+                setEditName={setEditName}
+                saving={saving === face.id}
+                confirming={confirm === face.id}
+                deleting={deleting === face.id}
+                onEdit={() => startEdit(face)}
+                onSave={() => saveEdit(face.id)}
+                onCancel={() => { setEditing(null); setConfirm(null) }}
+                onDelete={() => handleDelete(face.id)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {unknown.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+              Unknown ({unknown.length})
+            </p>
+            <button
+              onClick={clearUnknown}
+              disabled={clearingUnknown}
+              className="text-xs px-2 py-1 rounded-md transition-colors disabled:opacity-50"
+              style={{ background: '#3A3A3A', color: '#F87171' }}
+            >
+              {clearingUnknown ? 'Clearing…' : 'Clear All Unknown'}
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            {unknown.map(face => (
+              <FaceCard
+                key={face.id}
+                face={face}
+                editing={editing === face.id}
+                editName={editName}
+                setEditName={setEditName}
+                saving={saving === face.id}
+                confirming={confirm === face.id}
+                deleting={deleting === face.id}
+                onEdit={() => startEdit(face)}
+                onSave={() => saveEdit(face.id)}
+                onCancel={() => { setEditing(null); setConfirm(null) }}
+                onDelete={() => handleDelete(face.id)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function FaceCard({ face, editing, editName, setEditName, saving, confirming, deleting, onEdit, onSave, onCancel, onDelete }) {
+  const imgUrl = `/api/faces/${face.id}/image`
+  const isUnknown = face.name === 'Unknown'
+  return (
+    <div className="rounded-lg overflow-hidden" style={{ background: '#2A2A2A', border: '1px solid #3A3A3A' }}>
+      <div className="relative aspect-square bg-[#1E1E1E]">
+        <img
+          src={imgUrl}
+          alt={face.name}
+          className="w-full h-full object-cover"
+          onError={e => { e.target.style.display = 'none' }}
+        />
+        {isUnknown && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-12 h-12 rounded-full flex items-center justify-center"
+              style={{ background: 'rgba(168,85,247,0.2)', border: '1px solid rgba(168,85,247,0.4)' }}>
+              <span className="text-xl" style={{ color: '#A855F7' }}>?</span>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="p-2 space-y-1.5">
+        {editing ? (
+          <div className="flex gap-1">
+            <input
+              className="flex-1 min-w-0 bg-[#3A3A3A] border border-[#555] rounded px-1.5 py-0.5 text-xs text-white focus:outline-none"
+              value={editName}
+              onChange={e => setEditName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') onSave(); if (e.key === 'Escape') onCancel() }}
+              autoFocus
+              placeholder="Enter name…"
+            />
+            <button
+              onClick={onSave}
+              disabled={saving}
+              className="shrink-0 px-1.5 py-0.5 text-xs rounded transition-colors disabled:opacity-50"
+              style={{ background: '#A855F7', color: '#fff' }}
+            >
+              {saving ? '…' : 'Save'}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={onEdit}
+            className="w-full text-left text-xs font-medium truncate hover:opacity-80 transition-opacity"
+            style={{ color: isUnknown ? '#9CA3AF' : '#E5E7EB' }}
+            title="Click to rename"
+          >
+            {face.name}
+          </button>
+        )}
+        {!editing && (
+          confirming ? (
+            <div className="flex gap-1 items-center">
+              <button
+                onClick={onDelete}
+                disabled={deleting}
+                className="flex-1 text-xs py-0.5 rounded transition-colors disabled:opacity-50"
+                style={{ background: '#EF4444', color: '#fff' }}
+              >
+                {deleting ? '…' : 'Confirm'}
+              </button>
+              <button onClick={onCancel} className="text-xs text-gray-500 hover:text-gray-300 px-1">✕</button>
+            </div>
+          ) : (
+            <button
+              onClick={onDelete}
+              className="w-full text-xs py-0.5 rounded transition-colors hover:opacity-80"
+              style={{ background: '#3A3A3A', color: '#F87171' }}
+            >
+              Delete
+            </button>
+          )
+        )}
+      </div>
+    </div>
   )
 }
 

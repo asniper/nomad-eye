@@ -74,6 +74,16 @@ export const system = {
   reboot: () => api.post('/system/reboot'),
 }
 
+export const faces = {
+  list: () => api.get('/faces/'),
+  image: (id) => api.get(`/faces/${id}/image`, { responseType: 'blob' }),
+  rename: (id, name) => api.patch(`/faces/${id}`, { name }),
+  delete: (id) => api.delete(`/faces/${id}`),
+  deleteUnknown: () => api.delete('/faces/unknown'),
+  capture: (camera_id, name) => api.post(`/faces/capture?camera_id=${camera_id}&name=${encodeURIComponent(name)}`),
+  backend: () => api.get('/faces/backend'),
+}
+
 export const storage = {
   devices: () => api.get('/storage/devices'),
   mount: (device) => api.post(`/storage/devices/${device}/mount`),

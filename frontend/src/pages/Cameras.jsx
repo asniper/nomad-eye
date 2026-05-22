@@ -5,17 +5,19 @@ import Badge from '../components/Badge'
 import { cameras, detections as detectionsApi } from '../api/client'
 import { formatDateTime } from '../utils/dates'
 
-const OVERLAY_CATEGORIES = ['people', 'vehicles', 'animals', 'other']
+const OVERLAY_CATEGORIES = ['people', 'vehicles', 'animals', 'faces', 'other']
 const CATEGORY_STYLE = {
   people:   { on: { background: '#F87171', color: '#1a0000' }, off: { background: '#3A3A3A', color: '#F87171' } },
   vehicles: { on: { background: '#60A5FA', color: '#00001a' }, off: { background: '#3A3A3A', color: '#60A5FA' } },
   animals:  { on: { background: '#4ADE80', color: '#001a00' }, off: { background: '#3A3A3A', color: '#4ADE80' } },
+  faces:    { on: { background: '#A855F7', color: '#ffffff' }, off: { background: '#3A3A3A', color: '#A855F7' } },
   other:    { on: { background: '#FCD34D', color: '#1a1500' }, off: { background: '#3A3A3A', color: '#FCD34D' } },
 }
 const DETECTION_BADGE = {
   people:   { background: 'rgba(239,68,68,0.15)',  color: '#F87171' },
   vehicles: { background: 'rgba(59,130,246,0.15)', color: '#60A5FA' },
   animals:  { background: 'rgba(34,197,94,0.15)',  color: '#4ADE80' },
+  faces:    { background: 'rgba(168,85,247,0.15)', color: '#C084FC' },
   other:    { background: 'rgba(245,158,11,0.15)', color: '#FCD34D' },
 }
 

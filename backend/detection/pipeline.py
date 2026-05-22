@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from camera.capture import CameraCapture
 from camera.motion import MotionDetector
 from detection.detector import ObjectDetector, CATEGORY_COLORS_BGR
+from detection.face_recognizer import FaceRecognizer
 from notifications.dispatcher import dispatch_notification
 from config.settings import get_settings
 from storage.manager import get_active_images_dir
@@ -76,6 +77,7 @@ class DetectionPipeline:
         self._cameras = list(cameras)
         self._detectors = {cam.camera_id: MotionDetector() for cam in cameras}
         self._object_detector = ObjectDetector(model_name, confidences=confidences)
+        self._face_recognizer = FaceRecognizer()
         self._running = False
         self._threads: list[threading.Thread] = []
         self._latest_detections: dict = {}
@@ -124,6 +126,10 @@ class DetectionPipeline:
         new_detector = ObjectDetector(model_name, confidences=existing_confidences)
         with self._lock:
             self._object_detector = new_detector
+
+    def reload_faces(self):
+        """Re-sync face recognizer's in-memory known faces from DB."""
+        self._face_recognizer.reload()
 
     def set_category_confidence(self, category: str, value: float):
         with self._lock:
@@ -288,7 +294,24 @@ class DetectionPipeline:
                     t0 = time.time()
                     with self._lock:
                         detector = self._object_detector
+                        face_rec = self._face_recognizer
+
+                    # Run face recognition in parallel with YOLO
+                    face_result: list = []
+                    face_done = threading.Event()
+                    def _face_work(fr=face_rec, f=frame):
+                        try:
+                            face_result.extend(fr.detect_and_recognize(f))
+                        except Exception:
+                            pass
+                        face_done.set()
+                    threading.Thread(target=_face_work, daemon=True).start()
+
                     all_detections, timed_out = _detect_with_timeout(detector, frame)
+
+                    # Collect face results (should finish long before YOLO)
+                    face_done.wait(timeout=3.0)
+                    all_detections = all_detections + face_result
                     elapsed = time.time() - t0
                     if timed_out:
                         self._yolo_timeouts[cam.camera_id] = self._yolo_timeouts.get(cam.camera_id, 0) + 1

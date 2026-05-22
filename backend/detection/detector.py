@@ -16,13 +16,17 @@ CATEGORIES = {
     "bear": "animals", "deer": "animals", "rabbit": "animals",
 }
 
+# faces category is handled by FaceRecognizer, not YOLO
+
 # BGR color per category for OpenCV overlays
-# Matches the hex colors used on the frontend: people=#EF4444, vehicles=#3B82F6, animals=#22C55E, other=#F59E0B
+# Matches the hex colors used on the frontend:
+#   people=#EF4444, vehicles=#3B82F6, animals=#22C55E, other=#F59E0B, faces=#A855F7
 CATEGORY_COLORS_BGR = {
     "people":   (68,  68,  239),
     "vehicles": (246, 130, 59),
     "animals":  (94,  197, 34),
     "other":    (11,  158, 245),
+    "faces":    (247, 85,  168),
 }
 
 @dataclass
@@ -32,7 +36,7 @@ class Detection:
     confidence: float
     bbox: tuple
 
-_CATEGORIES_LIST = ["people", "vehicles", "animals", "other"]
+_CATEGORIES_LIST = ["people", "vehicles", "animals", "other", "faces"]
 
 def _resolve_model(model_name: str) -> str:
     """Prefer yolov8n.onnx over yolov8n.pt when available — faster CPU inference."""
