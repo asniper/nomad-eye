@@ -49,19 +49,20 @@ def _get_usb_id(video_path: str) -> str:
     return video_name
 
 
-def _get_or_create_camera_id(db: sqlite3.Connection, usb_id: str) -> Optional[int]:
+def _get_or_create_camera_id(db: sqlite3.Connection, usb_id: str) -> tuple[int, bool]:
     """Look up usb_id in the cameras table; insert with next available ID if new.
 
-    Returns None if the camera was explicitly deleted — the scanner should skip it.
+    Returns (camera_id, was_deleted). The caller decides whether to undelete based
+    on whether the device passes a live probe — ghost/codec devices fail the probe
+    and stay deleted; real cameras that are re-plugged get undeleted.
     """
     row = db.execute("SELECT camera_id, deleted FROM cameras WHERE usb_id=?", (usb_id,)).fetchone()
     now = datetime.now(timezone.utc).isoformat()
     if row:
-        if row['deleted']:
-            return None  # explicitly deleted — don't re-add
-        db.execute("UPDATE cameras SET last_seen=? WHERE usb_id=?", (now, usb_id))
-        db.commit()
-        return row['camera_id']
+        if not row['deleted']:
+            db.execute("UPDATE cameras SET last_seen=? WHERE usb_id=?", (now, usb_id))
+            db.commit()
+        return row['camera_id'], bool(row['deleted'])
     existing = {r['camera_id'] for r in db.execute("SELECT camera_id FROM cameras").fetchall()}
     cam_id = next(i for i in range(1000) if i not in existing)
     db.execute(
@@ -69,7 +70,7 @@ def _get_or_create_camera_id(db: sqlite3.Connection, usb_id: str) -> Optional[in
         (cam_id, usb_id, now),
     )
     db.commit()
-    return cam_id
+    return cam_id, False
 
 
 def _build_camera_list(db: sqlite3.Connection) -> list:
@@ -147,13 +148,20 @@ async def scan_and_refresh(db: sqlite3.Connection = None) -> list:
                 continue
 
             usb_id = _get_usb_id(path)
-            cam_id = _get_or_create_camera_id(_db, usb_id)
+            cam_id, was_deleted = _get_or_create_camera_id(_db, usb_id)
 
-            if cam_id is None or cam_id in existing_cam_ids:
+            if cam_id in existing_cam_ids:
                 continue
 
             ok = await loop.run_in_executor(None, _probe_device, path)
             if ok:
+                if was_deleted:
+                    now = datetime.now(timezone.utc).isoformat()
+                    _db.execute(
+                        "UPDATE cameras SET deleted=0, last_seen=? WHERE camera_id=?",
+                        (now, cam_id),
+                    )
+                    _db.commit()
                 dev_idx = int(path.replace("/dev/video", ""))
                 cap = CameraCapture(camera_id=cam_id, device_index=dev_idx, usb_id=usb_id)
                 cap.start()
