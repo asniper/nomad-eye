@@ -84,6 +84,20 @@ def capture_face_from_camera(camera_id: int, name: str = "Unknown", _=Depends(re
     return {"id": face_id, "name": name}
 
 
+@router.post("/{face_id}/merge-into/{target_id}")
+def merge_face_into(face_id: int, target_id: int, _=Depends(require_auth)):
+    if _pipeline is None:
+        raise HTTPException(503)
+    faces = _pipeline._face_recognizer.list_faces()
+    target = next((f for f in faces if f['id'] == target_id), None)
+    if not target:
+        raise HTTPException(404, "Target face not found")
+    ok = _pipeline._face_recognizer.rename_face(face_id, target['name'])
+    if not ok:
+        raise HTTPException(404, "Source face not found")
+    return {"id": face_id, "name": target['name']}
+
+
 @router.get("/backend")
 def get_backend(_=Depends(require_auth)):
     if _pipeline is None:

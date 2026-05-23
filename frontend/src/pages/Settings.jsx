@@ -381,6 +381,7 @@ function FacesCard() {
   const [saving, setSaving] = useState(null)
   const [confirm, setConfirm] = useState(null)    // face id pending delete
   const [deleting, setDeleting] = useState(null)
+  const [merging, setMerging] = useState(null)    // face id with merge dropdown open
   const [clearingUnknown, setClearingUnknown] = useState(false)
   const [backend, setBackend] = useState(null)
 
@@ -428,6 +429,14 @@ function FacesCard() {
     setClearingUnknown(false)
   }
 
+  const handleMerge = async (sourceId, targetId) => {
+    try {
+      await facesApi.mergeInto(sourceId, parseInt(targetId))
+      load()
+    } catch {}
+    setMerging(null)
+  }
+
   const unknown = faces ? faces.filter(f => f.name === 'Unknown') : []
   const known = faces ? faces.filter(f => f.name !== 'Unknown') : []
 
@@ -464,10 +473,15 @@ function FacesCard() {
                 saving={saving === face.id}
                 confirming={confirm === face.id}
                 deleting={deleting === face.id}
+                merging={merging === face.id}
+                mergeTargets={known.filter(f => f.id !== face.id)}
                 onEdit={() => startEdit(face)}
                 onSave={() => saveEdit(face.id)}
                 onCancel={() => { setEditing(null); setConfirm(null) }}
                 onDelete={() => handleDelete(face.id)}
+                onStartMerge={() => { setMerging(face.id); setEditing(null); setConfirm(null) }}
+                onMerge={(targetId) => handleMerge(face.id, targetId)}
+                onCancelMerge={() => setMerging(null)}
               />
             ))}
           </div>
@@ -500,10 +514,15 @@ function FacesCard() {
                 saving={saving === face.id}
                 confirming={confirm === face.id}
                 deleting={deleting === face.id}
+                merging={merging === face.id}
+                mergeTargets={known}
                 onEdit={() => startEdit(face)}
                 onSave={() => saveEdit(face.id)}
                 onCancel={() => { setEditing(null); setConfirm(null) }}
                 onDelete={() => handleDelete(face.id)}
+                onStartMerge={() => { setMerging(face.id); setEditing(null); setConfirm(null) }}
+                onMerge={(targetId) => handleMerge(face.id, targetId)}
+                onCancelMerge={() => setMerging(null)}
               />
             ))}
           </div>
@@ -513,7 +532,7 @@ function FacesCard() {
   )
 }
 
-function FaceCard({ face, editing, editName, setEditName, saving, confirming, deleting, onEdit, onSave, onCancel, onDelete }) {
+function FaceCard({ face, editing, editName, setEditName, saving, confirming, deleting, merging, mergeTargets, onEdit, onSave, onCancel, onDelete, onStartMerge, onMerge, onCancelMerge }) {
   const [imgUrl, setImgUrl] = useState(null)
   useEffect(() => {
     let url
@@ -573,7 +592,22 @@ function FaceCard({ face, editing, editName, setEditName, saving, confirming, de
           </button>
         )}
         {!editing && (
-          confirming ? (
+          merging ? (
+            <div className="flex gap-1">
+              <select
+                className="flex-1 min-w-0 text-xs rounded px-1 py-0.5 focus:outline-none"
+                style={{ background: '#3A3A3A', border: '1px solid #555', color: '#E5E7EB' }}
+                defaultValue=""
+                onChange={e => { if (e.target.value) onMerge(e.target.value) }}
+              >
+                <option value="" disabled>Merge into…</option>
+                {mergeTargets.map(f => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
+              </select>
+              <button onClick={onCancelMerge} className="text-xs text-gray-500 hover:text-gray-300 px-1">✕</button>
+            </div>
+          ) : confirming ? (
             <div className="flex gap-1 items-center">
               <button
                 onClick={onDelete}
@@ -586,13 +620,23 @@ function FaceCard({ face, editing, editName, setEditName, saving, confirming, de
               <button onClick={onCancel} className="text-xs text-gray-500 hover:text-gray-300 px-1">✕</button>
             </div>
           ) : (
-            <button
-              onClick={onDelete}
-              className="w-full text-xs py-0.5 rounded transition-colors hover:opacity-80"
-              style={{ background: '#3A3A3A', color: '#F87171' }}
-            >
-              Delete
-            </button>
+            <div className="flex gap-1">
+              <button
+                onClick={onDelete}
+                className="flex-1 text-xs py-0.5 rounded transition-colors hover:opacity-80"
+                style={{ background: '#3A3A3A', color: '#F87171' }}
+              >
+                Delete
+              </button>
+              <button
+                onClick={onStartMerge}
+                disabled={!mergeTargets || mergeTargets.length === 0}
+                className="flex-1 text-xs py-0.5 rounded transition-colors hover:opacity-80 disabled:opacity-30"
+                style={{ background: '#3A3A3A', color: '#A855F7' }}
+              >
+                Merge
+              </button>
+            </div>
           )
         )}
       </div>
