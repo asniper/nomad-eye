@@ -24,8 +24,13 @@ class CameraCapture:
 
     def start(self):
         self._cap = cv2.VideoCapture(self.device_index)
+        # Request MJPEG from the camera so USB carries compressed data (~5-15 Mbps)
+        # instead of raw YUYV (~440 Mbps at 720p). Critical when multiple cameras
+        # share the same USB 2.0 hub/bus — uncompressed overflows 480 Mbps bandwidth.
+        self._cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        self._cap.set(cv2.CAP_PROP_FPS, 15)
         self._running = True
         self._thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._thread.start()
