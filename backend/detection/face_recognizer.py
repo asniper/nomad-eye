@@ -19,6 +19,12 @@ _MATCH_THRESHOLD_HIST = 0.82   # cosine similarity: higher = stricter (OpenCV fa
 _MIN_FACE_PX = 40              # minimum face size in the DOWNSAMPLED image (≈80px at native 640px)
 _DETECTION_MAX_DIM = 320       # downsample to this max dim before HOG detection
 
+# Auto-sample building for known faces
+_AUTO_SAVE_CONF_FR   = 0.72   # minimum confidence to auto-save a new sample (dlib)
+_AUTO_SAVE_CONF_HIST = 0.90   # minimum confidence to auto-save a new sample (haar)
+_AUTO_SAVE_MIN_DIST  = 0.25   # new encoding must differ by at least this from all existing samples for that person
+_MAX_SAMPLES_PER_PERSON = 30  # cap on auto-saved encodings per named person
+
 # Global semaphore: only one face-detection call at a time across all cameras.
 # Prevents concurrent dlib HOG calls from saturating all CPU cores.
 _face_sem = threading.Semaphore(1)
@@ -123,6 +129,8 @@ class FaceRecognizer:
             label, face_id, conf = self._match_fr(enc)
             if face_id is None:
                 self._auto_save_async(frame, enc.astype(np.float64).tobytes(), (left, top, right, bottom))
+            elif conf >= _AUTO_SAVE_CONF_FR:
+                self._auto_save_known_async(label, frame, enc.astype(np.float64).tobytes(), (left, top, right, bottom))
             results.append(Detection(label=label, category='faces', confidence=conf,
                                      bbox=(left, top, right, bottom)))
         return results
@@ -160,6 +168,8 @@ class FaceRecognizer:
             bbox = (x, y, x+w, y+h)
             if face_id is None:
                 self._auto_save_async(frame, enc.tobytes(), bbox)
+            elif conf >= _AUTO_SAVE_CONF_HIST:
+                self._auto_save_known_async(label, frame, enc.tobytes(), bbox)
             results.append(Detection(label=label, category='faces', confidence=conf, bbox=bbox))
         return results
 
@@ -215,6 +225,41 @@ class FaceRecognizer:
             db.execute(
                 "INSERT INTO known_faces (name, encoding, image_path, created_at) VALUES (?,?,?,?)",
                 ('Unknown', enc_bytes, img_path, datetime.now(timezone.utc).isoformat())
+            )
+            db.commit()
+            db.close()
+            self._reload_from_db()
+        except Exception:
+            pass
+
+    def _auto_save_known_async(self, name: str, frame: np.ndarray, enc_bytes: bytes, bbox):
+        f = frame.copy()
+        threading.Thread(target=self._auto_save_known, args=(name, f, enc_bytes, bbox), daemon=True).start()
+
+    def _auto_save_known(self, name: str, frame: np.ndarray, enc_bytes: bytes, bbox):
+        enc = np.frombuffer(enc_bytes, dtype=np.float64)
+        with self._lock:
+            known = list(self._known)
+
+        same_name = [(fid, e) for fid, n, e, _ in known if n == name]
+        if len(same_name) >= _MAX_SAMPLES_PER_PERSON:
+            return
+
+        for _, known_enc in same_name:
+            if known_enc.shape == enc.shape:
+                if _HAS_FR:
+                    if float(np.linalg.norm(known_enc - enc)) < _AUTO_SAVE_MIN_DIST:
+                        return
+                else:
+                    if float(np.dot(enc, known_enc)) > (1.0 - _AUTO_SAVE_MIN_DIST):
+                        return
+
+        img_path = self._save_face_crop(frame, bbox)
+        try:
+            db = sqlite3.connect(cfg.db_path, timeout=10)
+            db.execute(
+                "INSERT INTO known_faces (name, encoding, image_path, created_at) VALUES (?,?,?,?)",
+                (name, enc_bytes, img_path, datetime.now(timezone.utc).isoformat())
             )
             db.commit()
             db.close()

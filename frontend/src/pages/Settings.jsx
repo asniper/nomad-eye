@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import { settings, detections as detectionsApi, storage as storageApi, system as systemApi, cameras as camerasApi, faces as facesApi } from '../api/client'
@@ -376,14 +376,8 @@ function FacesTab() {
 
 function FacesCard() {
   const [faces, setFaces] = useState(null)
-  const [editing, setEditing] = useState(null)    // face id being renamed
-  const [editName, setEditName] = useState('')
-  const [saving, setSaving] = useState(null)
-  const [confirm, setConfirm] = useState(null)    // face id pending delete
-  const [deleting, setDeleting] = useState(null)
-  const [merging, setMerging] = useState(null)    // face id with merge dropdown open
-  const [clearingUnknown, setClearingUnknown] = useState(false)
   const [backend, setBackend] = useState(null)
+  const [managingGroupName, setManagingGroupName] = useState(null)
 
   const load = useCallback(() => {
     facesApi.list().then(r => setFaces(r.data)).catch(() => setFaces([]))
@@ -392,59 +386,32 @@ function FacesCard() {
 
   useEffect(() => { load() }, [load])
 
-  const startEdit = (face) => {
-    setEditing(face.id)
-    setEditName(face.name)
-    setConfirm(null)
-  }
+  const groups = useMemo(() => {
+    if (!faces) return []
+    const map = {}
+    faces.forEach(face => {
+      if (!map[face.name]) map[face.name] = { name: face.name, faces: [] }
+      map[face.name].faces.push(face)
+    })
+    return Object.values(map).sort((a, b) => {
+      if (a.name === 'Unknown') return 1
+      if (b.name === 'Unknown') return -1
+      return a.name.localeCompare(b.name)
+    })
+  }, [faces])
 
-  const saveEdit = async (id) => {
-    if (!editName.trim()) return
-    setSaving(id)
-    try {
-      await facesApi.rename(id, editName.trim())
-      setFaces(f => f.map(x => x.id === id ? { ...x, name: editName.trim() } : x))
-      setEditing(null)
-    } catch {}
-    setSaving(null)
-  }
+  const knownNames = useMemo(() => groups.filter(g => g.name !== 'Unknown').map(g => g.name), [groups])
+  const managingGroup = managingGroupName ? groups.find(g => g.name === managingGroupName) ?? null : null
 
-  const handleDelete = async (id) => {
-    if (confirm !== id) { setConfirm(id); return }
-    setDeleting(id)
-    try {
-      await facesApi.delete(id)
-      setFaces(f => f.filter(x => x.id !== id))
-    } catch {}
-    setDeleting(null)
-    setConfirm(null)
-  }
-
-  const clearUnknown = async () => {
-    setClearingUnknown(true)
-    try {
-      await facesApi.deleteUnknown()
-      load()
-    } catch {}
-    setClearingUnknown(false)
-  }
-
-  const handleMerge = async (sourceId, targetId) => {
-    try {
-      await facesApi.mergeInto(sourceId, parseInt(targetId))
-      load()
-    } catch {}
-    setMerging(null)
-  }
-
-  const unknown = faces ? faces.filter(f => f.name === 'Unknown') : []
-  const known = faces ? faces.filter(f => f.name !== 'Unknown') : []
+  useEffect(() => {
+    if (managingGroupName && !managingGroup) setManagingGroupName(null)
+  }, [managingGroup, managingGroupName])
 
   return (
     <Card title="Faces">
       <div className="mb-4 flex items-center gap-3 flex-wrap">
         <p className="text-sm text-gray-400 flex-1">
-          Faces are detected automatically and saved here. Label them to recognize them in future detections.
+          Faces are detected and grouped automatically. Merge unknowns into known people to build recognition samples.
         </p>
         {backend && (
           <span className="text-xs px-2 py-0.5 rounded-full"
@@ -459,186 +426,219 @@ function FacesCard() {
         <p className="text-sm text-gray-500">No faces captured yet. Faces will appear here automatically when detected.</p>
       )}
 
-      {known.length > 0 && (
-        <div className="mb-6">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Known</p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {known.map(face => (
-              <FaceCard
-                key={face.id}
-                face={face}
-                editing={editing === face.id}
-                editName={editName}
-                setEditName={setEditName}
-                saving={saving === face.id}
-                confirming={confirm === face.id}
-                deleting={deleting === face.id}
-                merging={merging === face.id}
-                mergeTargets={known.filter(f => f.id !== face.id)}
-                onEdit={() => startEdit(face)}
-                onSave={() => saveEdit(face.id)}
-                onCancel={() => { setEditing(null); setConfirm(null) }}
-                onDelete={() => handleDelete(face.id)}
-                onStartMerge={() => { setMerging(face.id); setEditing(null); setConfirm(null) }}
-                onMerge={(targetId) => handleMerge(face.id, targetId)}
-                onCancelMerge={() => setMerging(null)}
-              />
-            ))}
-          </div>
+      {groups.length > 0 && (
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+          {groups.map(group => (
+            <FaceGroupCard
+              key={group.name}
+              group={group}
+              onManage={() => setManagingGroupName(group.name)}
+            />
+          ))}
         </div>
       )}
 
-      {unknown.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
-              Unknown ({unknown.length})
-            </p>
-            <button
-              onClick={clearUnknown}
-              disabled={clearingUnknown}
-              className="text-xs px-2 py-1 rounded-md transition-colors disabled:opacity-50"
-              style={{ background: '#3A3A3A', color: '#F87171' }}
-            >
-              {clearingUnknown ? 'Clearing…' : 'Clear All Unknown'}
-            </button>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {unknown.map(face => (
-              <FaceCard
-                key={face.id}
-                face={face}
-                editing={editing === face.id}
-                editName={editName}
-                setEditName={setEditName}
-                saving={saving === face.id}
-                confirming={confirm === face.id}
-                deleting={deleting === face.id}
-                merging={merging === face.id}
-                mergeTargets={known}
-                onEdit={() => startEdit(face)}
-                onSave={() => saveEdit(face.id)}
-                onCancel={() => { setEditing(null); setConfirm(null) }}
-                onDelete={() => handleDelete(face.id)}
-                onStartMerge={() => { setMerging(face.id); setEditing(null); setConfirm(null) }}
-                onMerge={(targetId) => handleMerge(face.id, targetId)}
-                onCancelMerge={() => setMerging(null)}
-              />
-            ))}
-          </div>
-        </div>
+      {managingGroup && (
+        <FaceManageModal
+          group={managingGroup}
+          knownNames={knownNames}
+          onClose={() => setManagingGroupName(null)}
+          onUpdate={load}
+        />
       )}
     </Card>
   )
 }
 
-function FaceCard({ face, editing, editName, setEditName, saving, confirming, deleting, merging, mergeTargets, onEdit, onSave, onCancel, onDelete, onStartMerge, onMerge, onCancelMerge }) {
+function FaceThumb({ faceId }) {
   const [imgUrl, setImgUrl] = useState(null)
   useEffect(() => {
     let url
-    facesApi.image(face.id)
+    facesApi.image(faceId)
       .then(r => { url = URL.createObjectURL(r.data); setImgUrl(url) })
       .catch(() => {})
     return () => { if (url) URL.revokeObjectURL(url) }
-  }, [face.id])
+  }, [faceId])
 
-  const isUnknown = face.name === 'Unknown'
+  if (!imgUrl) return (
+    <div className="w-full h-full flex items-center justify-center bg-[#1E1E1E]">
+      <span style={{ color: '#A855F7', fontSize: '1.1rem' }}>?</span>
+    </div>
+  )
+  return <img src={imgUrl} alt="" className="w-full h-full object-cover" />
+}
+
+function FaceGroupCard({ group, onManage }) {
+  const preview = group.faces.slice(0, 4)
+  const isUnknown = group.name === 'Unknown'
+
   return (
     <div className="rounded-lg overflow-hidden" style={{ background: '#2A2A2A', border: '1px solid #3A3A3A' }}>
-      <div className="relative aspect-square bg-[#1E1E1E]">
-        {imgUrl ? (
-          <img
-            src={imgUrl}
-            alt={face.name}
-            className="w-full h-full object-cover"
-          />
+      <div className="relative" style={{ aspectRatio: '1' }}>
+        {preview.length === 1 ? (
+          <div className="absolute inset-0">
+            <FaceThumb faceId={preview[0].id} />
+          </div>
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-12 h-12 rounded-full flex items-center justify-center"
-              style={{ background: 'rgba(168,85,247,0.2)', border: '1px solid rgba(168,85,247,0.4)' }}>
-              <span className="text-xl" style={{ color: '#A855F7' }}>?</span>
-            </div>
+          <div className="absolute inset-0 grid grid-cols-2 gap-px" style={{ background: '#3A3A3A' }}>
+            {[0, 1, 2, 3].map(i => (
+              <div key={i} className="overflow-hidden bg-[#1E1E1E]">
+                {preview[i] && <FaceThumb faceId={preview[i].id} />}
+              </div>
+            ))}
+          </div>
+        )}
+        {group.faces.length > 1 && (
+          <div className="absolute bottom-1 right-1 px-1 rounded text-[10px] font-semibold"
+            style={{ background: 'rgba(0,0,0,0.65)', color: '#E5E7EB' }}>
+            {group.faces.length}
           </div>
         )}
       </div>
-      <div className="p-2 space-y-1.5">
-        {editing ? (
-          <div className="flex gap-1">
-            <input
-              className="flex-1 min-w-0 bg-[#3A3A3A] border border-[#555] rounded px-1.5 py-0.5 text-xs text-white focus:outline-none"
-              value={editName}
-              onChange={e => setEditName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') onSave(); if (e.key === 'Escape') onCancel() }}
-              autoFocus
-              placeholder="Enter name…"
-            />
-            <button
-              onClick={onSave}
-              disabled={saving}
-              className="shrink-0 px-1.5 py-0.5 text-xs rounded transition-colors disabled:opacity-50"
-              style={{ background: '#A855F7', color: '#fff' }}
-            >
-              {saving ? '…' : 'Save'}
-            </button>
+      <div className="p-1.5 space-y-1">
+        <p className="text-xs font-medium truncate" style={{ color: isUnknown ? '#9CA3AF' : '#E5E7EB' }}>
+          {group.name}
+        </p>
+        <button
+          onClick={onManage}
+          className="w-full text-xs py-0.5 rounded hover:opacity-80 transition-opacity"
+          style={{ background: '#3A3A3A', color: '#A855F7' }}
+        >
+          Manage
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function FaceManageModal({ group, knownNames, onClose, onUpdate }) {
+  const [assigningId, setAssigningId] = useState(null)
+  const [deletingId, setDeletingId] = useState(null)
+  const [clearingAll, setClearingAll] = useState(false)
+  const isUnknown = group.name === 'Unknown'
+
+  const handleDelete = async (faceId) => {
+    setDeletingId(faceId)
+    try { await facesApi.delete(faceId); onUpdate() } catch {}
+    setDeletingId(null)
+  }
+
+  const handleDisassociate = async (faceId) => {
+    try { await facesApi.disassociate(faceId); onUpdate() } catch {}
+  }
+
+  const handleAssign = async (faceId, name) => {
+    setAssigningId(null)
+    try { await facesApi.rename(faceId, name); onUpdate() } catch {}
+  }
+
+  const handleClearAll = async () => {
+    if (!confirm(`Delete all ${group.faces.length} samples for "${group.name}"?`)) return
+    setClearingAll(true)
+    try {
+      if (isUnknown) {
+        await facesApi.deleteUnknown()
+      } else {
+        for (const face of group.faces) {
+          try { await facesApi.delete(face.id) } catch {}
+        }
+      }
+      onUpdate()
+      onClose()
+    } catch {}
+    setClearingAll(false)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.72)' }}
+      onClick={onClose}>
+      <div className="rounded-xl p-4 w-full max-w-md max-h-[80vh] flex flex-col"
+        style={{ background: '#1A1A1A', border: '1px solid #3A3A3A' }}
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-3 shrink-0">
+          <div>
+            <h3 className="text-white font-semibold">{group.name}</h3>
+            <p className="text-xs text-gray-500">{group.faces.length} sample{group.faces.length !== 1 ? 's' : ''}</p>
           </div>
-        ) : (
-          <button
-            onClick={onEdit}
-            className="w-full text-left text-xs font-medium truncate hover:opacity-80 transition-opacity"
-            style={{ color: isUnknown ? '#9CA3AF' : '#E5E7EB' }}
-            title="Click to rename"
-          >
-            {face.name}
-          </button>
-        )}
-        {!editing && (
-          merging ? (
-            <div className="flex gap-1">
-              <select
-                className="flex-1 min-w-0 text-xs rounded px-1 py-0.5 focus:outline-none"
-                style={{ background: '#3A3A3A', border: '1px solid #555', color: '#E5E7EB' }}
-                defaultValue=""
-                onChange={e => { if (e.target.value) onMerge(e.target.value) }}
-              >
-                <option value="" disabled>Merge into…</option>
-                {mergeTargets.map(f => (
-                  <option key={f.id} value={f.id}>{f.name}</option>
-                ))}
-              </select>
-              <button onClick={onCancelMerge} className="text-xs text-gray-500 hover:text-gray-300 px-1">✕</button>
-            </div>
-          ) : confirming ? (
-            <div className="flex gap-1 items-center">
-              <button
-                onClick={onDelete}
-                disabled={deleting}
-                className="flex-1 text-xs py-0.5 rounded transition-colors disabled:opacity-50"
-                style={{ background: '#EF4444', color: '#fff' }}
-              >
-                {deleting ? '…' : 'Confirm'}
-              </button>
-              <button onClick={onCancel} className="text-xs text-gray-500 hover:text-gray-300 px-1">✕</button>
-            </div>
-          ) : (
-            <div className="flex gap-1">
-              <button
-                onClick={onDelete}
-                className="flex-1 text-xs py-0.5 rounded transition-colors hover:opacity-80"
-                style={{ background: '#3A3A3A', color: '#F87171' }}
-              >
-                Delete
-              </button>
-              <button
-                onClick={onStartMerge}
-                disabled={!mergeTargets || mergeTargets.length === 0}
-                className="flex-1 text-xs py-0.5 rounded transition-colors hover:opacity-80 disabled:opacity-30"
-                style={{ background: '#3A3A3A', color: '#A855F7' }}
-              >
-                Merge
-              </button>
-            </div>
-          )
-        )}
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-xl leading-none ml-4">✕</button>
+        </div>
+
+        <div className="overflow-y-auto flex-1">
+          <div className="grid grid-cols-3 gap-2">
+            {group.faces.map(face => (
+              <div key={face.id} className="rounded-lg overflow-hidden" style={{ background: '#2A2A2A', border: '1px solid #3A3A3A' }}>
+                <div className="aspect-square">
+                  <FaceThumb faceId={face.id} />
+                </div>
+                <div className="p-1.5 space-y-1">
+                  <p className="text-[10px] text-gray-500">
+                    {new Date(face.created_at).toLocaleDateString()}
+                  </p>
+                  {isUnknown ? (
+                    assigningId === face.id ? (
+                      <select
+                        className="w-full text-[10px] rounded px-1 py-0.5 focus:outline-none"
+                        style={{ background: '#3A3A3A', border: '1px solid #555', color: '#E5E7EB' }}
+                        defaultValue=""
+                        onChange={e => { if (e.target.value) handleAssign(face.id, e.target.value) }}
+                      >
+                        <option value="" disabled>Assign to…</option>
+                        {knownNames.map(name => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    ) : (
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => setAssigningId(face.id)}
+                          disabled={knownNames.length === 0}
+                          className="flex-1 text-[10px] py-0.5 rounded disabled:opacity-30 hover:opacity-80"
+                          style={{ background: '#3A3A3A', color: '#A855F7' }}
+                        >
+                          Assign
+                        </button>
+                        <button
+                          onClick={() => handleDelete(face.id)}
+                          disabled={deletingId === face.id}
+                          className="flex-1 text-[10px] py-0.5 rounded disabled:opacity-50 hover:opacity-80"
+                          style={{ background: '#3A3A3A', color: '#F87171' }}
+                        >
+                          {deletingId === face.id ? '…' : 'Del'}
+                        </button>
+                      </div>
+                    )
+                  ) : (
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => handleDisassociate(face.id)}
+                        className="flex-1 text-[10px] py-0.5 rounded hover:opacity-80"
+                        style={{ background: '#3A3A3A', color: '#9CA3AF' }}
+                        title="Move back to Unknown"
+                      >
+                        Remove
+                      </button>
+                      <button
+                        onClick={() => handleDelete(face.id)}
+                        disabled={deletingId === face.id}
+                        className="flex-1 text-[10px] py-0.5 rounded disabled:opacity-50 hover:opacity-80"
+                        style={{ background: '#3A3A3A', color: '#F87171' }}
+                      >
+                        {deletingId === face.id ? '…' : 'Del'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <button
+          onClick={handleClearAll}
+          disabled={clearingAll}
+          className="mt-3 w-full text-xs py-1.5 rounded shrink-0 disabled:opacity-50 hover:opacity-80 transition-opacity"
+          style={{ background: 'rgba(239,68,68,0.15)', color: '#F87171', border: '1px solid rgba(239,68,68,0.3)' }}
+        >
+          {clearingAll ? 'Deleting…' : `Delete All ${group.faces.length} Samples`}
+        </button>
       </div>
     </div>
   )

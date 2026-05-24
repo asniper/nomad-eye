@@ -81,6 +81,7 @@ export const faces = {
   delete: (id) => api.delete(`/faces/${id}`),
   deleteUnknown: () => api.delete('/faces/unknown'),
   mergeInto: (sourceId, targetId) => api.post(`/faces/${sourceId}/merge-into/${targetId}`),
+  disassociate: (id) => api.post(`/faces/${id}/disassociate`),
   capture: (camera_id, name) => api.post(`/faces/capture?camera_id=${camera_id}&name=${encodeURIComponent(name)}`),
   backend: () => api.get('/faces/backend'),
 }

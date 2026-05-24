@@ -84,6 +84,16 @@ def capture_face_from_camera(camera_id: int, name: str = "Unknown", _=Depends(re
     return {"id": face_id, "name": name}
 
 
+@router.post("/{face_id}/disassociate")
+def disassociate_face(face_id: int, _=Depends(require_auth)):
+    if _pipeline is None:
+        raise HTTPException(503)
+    ok = _pipeline._face_recognizer.rename_face(face_id, 'Unknown')
+    if not ok:
+        raise HTTPException(404)
+    return {"id": face_id, "name": "Unknown"}
+
+
 @router.post("/{face_id}/merge-into/{target_id}")
 def merge_face_into(face_id: int, target_id: int, _=Depends(require_auth)):
     if _pipeline is None:
