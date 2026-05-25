@@ -65,26 +65,6 @@ Once the service is running, open `http://<device-ip>` in a browser.
 
 ---
 
-## Configuration
-
-Create a `.env` file in `/opt/nomad-eye/` to override defaults.
-
-| Variable | Default | Description |
-|---|---|---|
-| `ADMIN_USERNAME` | `admin` | Admin login username |
-| `ADMIN_PASSWORD` | `nomadeye` | Admin login password |
-| `SECRET_KEY` | *(generated)* | JWT signing key |
-| `DB_PATH` | `data/db/app.db` | SQLite database path |
-| `IMAGES_DIR` | `data/images` | Detection snapshot storage |
-| `CLIPS_DIR` | `data/clips` | Video clip storage |
-| `DETECTION_CONFIDENCE` | `0.5` | Minimum detection confidence (0–1) |
-| `MOTION_THRESHOLD` | `500` | Pixel-change threshold to trigger motion |
-| `CLIP_SECONDS_BEFORE` | `5` | Seconds of pre-event clip to save |
-| `CLIP_SECONDS_AFTER` | `5` | Seconds of post-event clip to save |
-
-For all configuration options and the app_config database keys, see the [Configuration wiki page](../../wiki/Configuration).
-
----
 
 ## Documentation
 
@@ -93,7 +73,7 @@ Full documentation lives in the [project wiki](../../wiki):
 | Page | Description |
 |---|---|
 | [Installation](../../wiki/Installation) | Full install guide, sudo helper setup, first boot |
-| [Configuration](../../wiki/Configuration) | .env variables, DB config keys |
+| [Configuration](../../wiki/Configuration) | Settings, DB config keys, storage paths |
 | [Camera Setup](../../wiki/Camera-Setup) | USB cameras, bandwidth, enabling/disabling |
 | [AI Detection](../../wiki/AI-Detection) | Models, thresholds, open-vocab classes |
 | [Face Recognition](../../wiki/Face-Recognition) | Face library, merging, performance |
