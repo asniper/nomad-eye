@@ -17,7 +17,7 @@ if [ -d "$REPO_DIR/.git" ]; then
     cd $REPO_DIR && git pull
 else
     echo "Cloning repository..."
-    sudo git clone https://github.com/YOUR_USERNAME/nomad-eye.git $REPO_DIR
+    sudo git clone https://github.com/asniper/nomad-eye.git $REPO_DIR
     sudo chown -R $USER:$USER $REPO_DIR
 fi
 
