@@ -55,6 +55,6 @@ sudo systemctl restart nomad-eye-backend nomad-eye-network
 
 echo ""
 echo "=== Deployment complete ==="
-echo "Access the web app at: http://$(hostname -I | awk '{print $1}'):8000"
+echo "Access the web app at: http://$(hostname -I | awk '{print $1}')"
 echo "Default login: admin / nomadeye"
 echo "IMPORTANT: Change your password in Settings after first login."

@@ -54,7 +54,7 @@ See the [Installation wiki page](../../wiki/Installation) for manual step-by-ste
 
 ## First Login
 
-Once the service is running, open `http://<device-ip>:8000` in a browser.
+Once the service is running, open `http://<device-ip>` in a browser.
 
 | Field | Default |
 |---|---|
