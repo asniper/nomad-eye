@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import { settings, detections as detectionsApi, storage as storageApi, system as systemApi, cameras as camerasApi, faces as facesApi } from '../api/client'
@@ -27,6 +27,32 @@ const TIMEZONES = [
   { label: 'Auckland (NZST/NZDT)', value: 'Pacific/Auckland' },
 ]
 
+const DEFAULT_WILDLIFE_CLASSES = "deer, moose, elk, bear, mountain lion, bobcat, coyote, fox, raccoon, skunk, rabbit, squirrel, groundhog, muskrat, ferret, cat, dog, bird, person, car, truck, bus, motorcycle, bicycle, van, ATV, snowmobile"
+
+const DETECTION_MODELS = [
+  { key: 'yolov8n', name: 'YOLOv8 Nano', speed: 'Fast', openVocab: false, requiresInstall: false,
+    description: 'Fastest standard model. Detects people, vehicles, and common animals: cat, dog, bird, bear, horse, cow, sheep. Does not detect deer, moose, or most North American wildlife.' },
+  { key: 'yolov8s', name: 'YOLOv8 Small', speed: 'Medium', openVocab: false, requiresInstall: false,
+    description: 'More accurate than Nano with the same COCO-80 classes. Better at detecting small or distant subjects.' },
+  { key: 'yolov8m', name: 'YOLOv8 Medium', speed: 'Slow', openVocab: false, requiresInstall: false,
+    description: 'Highest accuracy of the standard YOLO line. Same COCO-80 classes. Significantly slower on ARM — best with a fast CPU.' },
+  { key: 'yolov8s-worldv2', name: 'YOLOWorld', speed: 'Medium', openVocab: true, requiresInstall: false,
+    description: 'Open-vocabulary YOLO — you define what to detect. Add deer, moose, elk, mountain lion, bobcat, etc. ~44 MB download on first use. Best balance of speed and North American wildlife detection.' },
+  { key: 'megadetector', name: 'MegaDetector v5', speed: 'Medium', openVocab: false, requiresInstall: false,
+    description: "Trained on millions of wildlife camera trap images by Microsoft. Detects any animal (deer, moose, elk, mountain lion — anything) as 'animal'. Also detects people and vehicles. ~220 MB download. Best raw wildlife sensitivity; does not identify specific species." },
+  { key: 'owlv2', name: 'OWLv2', speed: 'Very Slow', openVocab: true, requiresInstall: true,
+    description: "Google's open-vocabulary vision transformer. Define any class by name — high accuracy on rare or unusual species. Very slow on CPU (10–30s/scan); only practical with the 30s periodic scan. Requires transformers library (~2 GB download)." },
+  { key: 'grounding-dino', name: 'Grounding DINO', speed: 'Very Slow', openVocab: true, requiresInstall: true,
+    description: 'Powerful open-vocabulary detection — describe objects in natural language. Very slow on CPU. Useful for difficult or rare subjects. Requires transformers library.' },
+]
+
+const SPEED_STYLE = {
+  'Fast':      { background: 'rgba(34,197,94,0.15)',   color: '#4ADE80' },
+  'Medium':    { background: 'rgba(255,184,0,0.15)',   color: '#FFB800' },
+  'Slow':      { background: 'rgba(249,115,22,0.15)',  color: '#FB923C' },
+  'Very Slow': { background: 'rgba(239,68,68,0.15)',   color: '#F87171' },
+}
+
 const STATUS_OPTIONS = ['home', 'away', 'sleep', 'vacation']
 const STATUS_COLOR = { home: 'green', away: 'yellow', sleep: 'blue', vacation: 'red' }
 
@@ -48,7 +74,8 @@ const TABS = [
   { id: 'general', label: 'General' },
   { id: 'faces', label: 'Faces' },
   { id: 'network', label: 'Network' },
-  { id: 'storage', label: 'Storage & System' },
+  { id: 'storage', label: 'Storage' },
+  { id: 'system', label: 'System' },
 ]
 
 export default function Settings() {
@@ -58,6 +85,7 @@ export default function Settings() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState({})
   const [saved, setSaved] = useState({})
+  const [errors, setErrors] = useState({})
   const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'general')
 
   const changeTab = useCallback((id) => {
@@ -77,13 +105,17 @@ export default function Settings() {
 
   const saveSetting = async (key, value) => {
     setSaving(s => ({ ...s, [key]: true }))
+    setErrors(s => ({ ...s, [key]: null }))
     try {
       await settings.set(key, value)
       setAllSettings(s => ({ ...s, [key]: value }))
       if (key === 'timezone') setTimezone(value)
       setSaved(s => ({ ...s, [key]: true }))
       setTimeout(() => setSaved(s => ({ ...s, [key]: false })), 2000)
-    } catch {}
+    } catch (e) {
+      const msg = e?.response?.data?.detail || 'Failed to save — check device logs.'
+      setErrors(s => ({ ...s, [key]: msg }))
+    }
     setSaving(s => ({ ...s, [key]: false }))
   }
 
@@ -112,6 +144,7 @@ export default function Settings() {
 
       {tab === 'network' && <Network />}
       {tab === 'storage' && <StorageTab />}
+      {tab === 'system' && <SystemTab allSettings={allSettings} saveSetting={saveSetting} saving={saving} saved={saved} />}
       {tab === 'faces' && <FacesTab />}
 
       {tab === 'general' && <>
@@ -143,49 +176,28 @@ export default function Settings() {
       </Card>
 
       <Card title="Detection">
-        <SettingRow label="Timezone" hint="Used to display detection timestamps correctly.">
-          <div className="flex items-center gap-2">
-            <select
-              value={allSettings.timezone ?? ''}
-              onChange={e => saveSetting('timezone', e.target.value)}
-              className={`${inputCls} w-full sm:w-72`}
-              onFocus={e => e.target.style.borderColor = '#151925'}
-              onBlur={e => e.target.style.borderColor = '#484848'}
-            >
-              <option value="">— Use browser default —</option>
-              {TIMEZONES.map(tz => (
-                <option key={tz.value} value={tz.value}>{tz.label}</option>
-              ))}
-            </select>
-            {saving.timezone && <span className="text-xs text-gray-500">Saving…</span>}
-            {saved.timezone && <span className="text-xs text-green-400">Saved ✓</span>}
+        {/* AI enabled toggle */}
+        <div className="flex items-center justify-between py-3 mb-2 border-b border-[#3A3A3A]">
+          <div>
+            <p className="text-sm font-medium text-white">AI Detection</p>
+            <p className="text-xs text-gray-500 mt-0.5">Enable or disable all AI-based object and face detection.</p>
           </div>
-        </SettingRow>
-        <SettingRow label="YOLO Model" hint="Larger models detect more accurately but run slower. Switching reloads the AI.">
-          <div className="flex flex-col gap-2">
-            <div className="flex gap-2 flex-wrap">
-              {[
-                { id: 'yolov8n', label: 'Nano', sub: 'Fastest' },
-                { id: 'yolov8s', label: 'Small', sub: 'Balanced' },
-                { id: 'yolov8m', label: 'Medium', sub: 'Accurate' },
-              ].map(m => (
-                <button
-                  key={m.id}
-                  onClick={() => saveSetting('yolo_model', m.id)}
-                  disabled={saving.yolo_model}
-                  className="px-3 py-1.5 rounded-md text-sm font-medium transition-opacity hover:opacity-80 disabled:opacity-50"
-                  style={(allSettings.yolo_model ?? 'yolov8n') === m.id
-                    ? { background: '#FFB800', color: '#151925' }
-                    : { background: '#3A3A3A', color: '#ffffff' }
-                  }
-                >
-                  {m.label} <span className="text-xs opacity-70">{m.sub}</span>
-                </button>
-              ))}
-            </div>
-            {saving.yolo_model && <p className="text-xs text-yellow-400">Loading model, please wait…</p>}
-            {saved.yolo_model && <p className="text-xs text-green-400">Model loaded ✓</p>}
-          </div>
+          <button
+            onClick={() => saveSetting('ai_enabled', (allSettings.ai_enabled ?? '1') === '0' ? '1' : '0')}
+            className="relative w-11 h-6 rounded-full transition-colors shrink-0"
+            style={{ background: (allSettings.ai_enabled ?? '1') !== '0' ? '#FFB800' : '#3A3A3A' }}
+          >
+            <span
+              className="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all"
+              style={{ left: (allSettings.ai_enabled ?? '1') !== '0' ? '1.375rem' : '0.25rem' }}
+            />
+          </button>
+        </div>
+
+        {/* All settings below are disabled when AI is off */}
+        <div className={(allSettings.ai_enabled ?? '1') === '0' ? 'opacity-40 pointer-events-none select-none' : ''}>
+        <SettingRow label="Detection Model" hint="The AI model used to classify detected motion. Switching downloads and loads the new model — may take a minute.">
+          <ModelSelector allSettings={allSettings} onSave={saveSetting} saving={saving} saved={saved} errors={errors} />
         </SettingRow>
         <SettingRow label="Confidence thresholds" hint="Per-category minimum confidence. Higher = fewer false positives.">
           <ConfidenceSliders allSettings={allSettings} onSave={saveSetting} saving={saving} saved={saved} />
@@ -193,13 +205,14 @@ export default function Settings() {
         <SettingRow label="Motion threshold" hint="Pixel area. Higher = less sensitive to small motion.">
           <NumberInput
             keyName="motion_threshold"
-            current={allSettings.motion_threshold ?? 500}
+            current={allSettings.motion_threshold ?? 100}
             min={100} max={5000} step={100}
             onSave={saveSetting}
             saving={saving.motion_threshold}
             saved={saved.motion_threshold}
           />
         </SettingRow>
+        </div>
       </Card>
 
       <Card title="SMS">
@@ -256,7 +269,7 @@ export default function Settings() {
         </SettingRow>
       </Card>
 
-      <CamerasCard />
+      <CamerasCard allSettings={allSettings} saveSetting={saveSetting} saving={saving} saved={saved} />
 
       <Card title="Account">
         <SettingRow label="Sign out" hint="You will be returned to the login screen.">
@@ -274,10 +287,11 @@ export default function Settings() {
   )
 }
 
-function CamerasCard() {
+function CamerasCard({ allSettings, saveSetting, saving, saved }) {
   const [cams, setCams] = useState(null)
-  const [confirm, setConfirm] = useState(null) // camera_id being confirmed for delete
+  const [confirm, setConfirm] = useState(null)
   const [deleting, setDeleting] = useState(null)
+  const [togglingEnabled, setTogglingEnabled] = useState(null)
 
   const load = useCallback(() => {
     camerasApi.list().then(r => setCams(r.data)).catch(() => setCams([]))
@@ -330,9 +344,31 @@ function CamerasCard() {
                   <p className="text-xs text-gray-700 mt-0.5">Last seen {new Date(cam.last_seen).toLocaleString()}</p>
                 )}
               </div>
-              {isOffline && (
-                <div className="flex items-center gap-2 shrink-0">
-                  {isConfirming ? (
+              <div className="flex items-center gap-3 shrink-0">
+                {/* Enable/disable toggle */}
+                <button
+                  disabled={togglingEnabled === cam.id}
+                  onClick={async () => {
+                    setTogglingEnabled(cam.id)
+                    try {
+                      await camerasApi.setEnabled(cam.id, !cam.enabled)
+                      load()
+                    } catch {}
+                    setTogglingEnabled(null)
+                  }}
+                  className="relative w-9 h-5 rounded-full transition-colors shrink-0"
+                  style={{ background: cam.enabled ? '#22C55E' : '#3A3A3A', opacity: togglingEnabled === cam.id ? 0.5 : 1 }}
+                  title={cam.enabled ? 'Disable camera' : 'Enable camera'}
+                >
+                  <span
+                    className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all"
+                    style={{ left: cam.enabled ? '1.125rem' : '0.125rem' }}
+                  />
+                </button>
+
+                {/* Delete (offline only) */}
+                {isOffline && (
+                  isConfirming ? (
                     <>
                       <span className="text-xs text-gray-400">Delete {cam.event_count} event{cam.event_count !== 1 ? 's' : ''}?</span>
                       <button
@@ -355,13 +391,79 @@ function CamerasCard() {
                     >
                       Delete
                     </button>
-                  )}
-                </div>
-              )}
+                  )
+                )}
+              </div>
             </div>
           )
         })}
       </div>
+
+      {/* Video Quality */}
+      {(() => {
+        const aiOn = (allSettings?.ai_enabled ?? '1') !== '0'
+        const res = allSettings?.video_resolution ?? '1280x720'
+        const fps = allSettings?.video_fps ?? '15'
+        return (
+          <div className="mt-4 pt-4 border-t border-[#3A3A3A]">
+            <div className="flex items-center gap-2 mb-3">
+              <p className="text-sm font-medium text-white">Video Quality</p>
+              {aiOn && (
+                <span className="text-xs px-2 py-0.5 rounded-full"
+                  style={{ background: 'rgba(255,184,0,0.15)', color: '#FFB800' }}>
+                  Overridden by AI (1280×720 @ 15 fps)
+                </span>
+              )}
+            </div>
+            <div className={`flex flex-wrap gap-4 ${aiOn ? 'opacity-40 pointer-events-none select-none' : ''}`}>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1.5">Resolution</label>
+                <div className="flex gap-1.5 flex-wrap">
+                  {[
+                    { label: '640×480', value: '640x480' },
+                    { label: '1280×720', value: '1280x720' },
+                    { label: '1920×1080', value: '1920x1080' },
+                  ].map(r => (
+                    <button
+                      key={r.value}
+                      onClick={() => {
+                        const [w, h] = r.value.split('x').map(Number)
+                        saveSetting('video_resolution', r.value)
+                        saveSetting('video_width', String(w))
+                        saveSetting('video_height', String(h))
+                      }}
+                      className="px-3 py-1 rounded-md text-xs font-medium transition-opacity hover:opacity-80"
+                      style={res === r.value
+                        ? { background: '#FFB800', color: '#151925' }
+                        : { background: '#3A3A3A', color: '#9CA3AF' }
+                      }
+                    >{r.label}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1.5">Frame Rate</label>
+                <div className="flex gap-1.5 flex-wrap">
+                  {['10', '15', '24', '30'].map(f => (
+                    <button
+                      key={f}
+                      onClick={() => saveSetting('video_fps', f)}
+                      className="px-3 py-1 rounded-md text-xs font-medium transition-opacity hover:opacity-80"
+                      style={fps === f
+                        ? { background: '#FFB800', color: '#151925' }
+                        : { background: '#3A3A3A', color: '#9CA3AF' }
+                      }
+                    >{f} fps</button>
+                  ))}
+                </div>
+              </div>
+              {(saved?.video_fps || saved?.video_resolution) && (
+                <p className="text-xs text-green-400 self-end mb-0.5">Saved — reload cameras to apply</p>
+              )}
+            </div>
+          </div>
+        )
+      })()}
     </Card>
   )
 }
@@ -386,22 +488,23 @@ function FacesCard() {
 
   useEffect(() => { load() }, [load])
 
-  const groups = useMemo(() => {
-    if (!faces) return []
+  const { knownGroups, unknownGroup } = useMemo(() => {
+    if (!faces) return { knownGroups: [], unknownGroup: null }
     const map = {}
     faces.forEach(face => {
       if (!map[face.name]) map[face.name] = { name: face.name, faces: [] }
       map[face.name].faces.push(face)
     })
-    return Object.values(map).sort((a, b) => {
-      if (a.name === 'Unknown') return 1
-      if (b.name === 'Unknown') return -1
-      return a.name.localeCompare(b.name)
-    })
+    const all = Object.values(map)
+    return {
+      knownGroups: all.filter(g => g.name !== 'Unknown').sort((a, b) => a.name.localeCompare(b.name)),
+      unknownGroup: all.find(g => g.name === 'Unknown') ?? null,
+    }
   }, [faces])
 
-  const knownNames = useMemo(() => groups.filter(g => g.name !== 'Unknown').map(g => g.name), [groups])
-  const managingGroup = managingGroupName ? groups.find(g => g.name === managingGroupName) ?? null : null
+  const knownNames = useMemo(() => knownGroups.map(g => g.name), [knownGroups])
+  const allGroups = useMemo(() => [...knownGroups, ...(unknownGroup ? [unknownGroup] : [])], [knownGroups, unknownGroup])
+  const managingGroup = managingGroupName ? allGroups.find(g => g.name === managingGroupName) ?? null : null
 
   useEffect(() => {
     if (managingGroupName && !managingGroup) setManagingGroupName(null)
@@ -411,7 +514,7 @@ function FacesCard() {
     <Card title="Faces">
       <div className="mb-4 flex items-center gap-3 flex-wrap">
         <p className="text-sm text-gray-400 flex-1">
-          Faces are detected and grouped automatically. Merge unknowns into known people to build recognition samples.
+          Faces are detected and grouped automatically. Assign unknowns to build recognition for known people.
         </p>
         {backend && (
           <span className="text-xs px-2 py-0.5 rounded-full"
@@ -426,15 +529,45 @@ function FacesCard() {
         <p className="text-sm text-gray-500">No faces captured yet. Faces will appear here automatically when detected.</p>
       )}
 
-      {groups.length > 0 && (
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-          {groups.map(group => (
-            <FaceGroupCard
-              key={group.name}
-              group={group}
-              onManage={() => setManagingGroupName(group.name)}
-            />
-          ))}
+      {knownGroups.length > 0 && (
+        <div className="mb-4">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Identified</p>
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+            {knownGroups.map(group => (
+              <FaceGroupCard key={group.name} group={group} onManage={() => setManagingGroupName(group.name)} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {unknownGroup && (
+        <div className={knownGroups.length > 0 ? 'border-t border-[#3A3A3A] pt-4' : ''}>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Unknown <span className="normal-case font-normal">({unknownGroup.faces.length})</span>
+            </p>
+            <button
+              onClick={() => setManagingGroupName('Unknown')}
+              className="text-xs hover:opacity-80 transition-opacity"
+              style={{ color: '#A855F7' }}
+            >
+              Manage all
+            </button>
+          </div>
+          <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-1.5">
+            {unknownGroup.faces.slice(0, 16).map(face => (
+              <UnknownFaceTile key={face.id} face={face} knownNames={knownNames} onUpdate={load} />
+            ))}
+            {unknownGroup.faces.length > 16 && (
+              <button
+                onClick={() => setManagingGroupName('Unknown')}
+                className="aspect-square rounded-lg flex items-center justify-center text-xs hover:opacity-80 transition-opacity"
+                style={{ background: '#2A2A2A', border: '1px solid #3A3A3A', color: '#9CA3AF' }}
+              >
+                +{unknownGroup.faces.length - 16}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -470,15 +603,11 @@ function FaceThumb({ faceId }) {
 
 function FaceGroupCard({ group, onManage }) {
   const preview = group.faces.slice(0, 4)
-  const isUnknown = group.name === 'Unknown'
-
   return (
     <div className="rounded-lg overflow-hidden" style={{ background: '#2A2A2A', border: '1px solid #3A3A3A' }}>
       <div className="relative" style={{ aspectRatio: '1' }}>
         {preview.length === 1 ? (
-          <div className="absolute inset-0">
-            <FaceThumb faceId={preview[0].id} />
-          </div>
+          <div className="absolute inset-0"><FaceThumb faceId={preview[0].id} /></div>
         ) : (
           <div className="absolute inset-0 grid grid-cols-2 gap-px" style={{ background: '#3A3A3A' }}>
             {[0, 1, 2, 3].map(i => (
@@ -496,14 +625,9 @@ function FaceGroupCard({ group, onManage }) {
         )}
       </div>
       <div className="p-1.5 space-y-1">
-        <p className="text-xs font-medium truncate" style={{ color: isUnknown ? '#9CA3AF' : '#E5E7EB' }}>
-          {group.name}
-        </p>
-        <button
-          onClick={onManage}
-          className="w-full text-xs py-0.5 rounded hover:opacity-80 transition-opacity"
-          style={{ background: '#3A3A3A', color: '#A855F7' }}
-        >
+        <p className="text-xs font-medium truncate text-white">{group.name}</p>
+        <button onClick={onManage} className="w-full text-xs py-0.5 rounded hover:opacity-80 transition-opacity"
+          style={{ background: '#3A3A3A', color: '#A855F7' }}>
           Manage
         </button>
       </div>
@@ -511,11 +635,97 @@ function FaceGroupCard({ group, onManage }) {
   )
 }
 
+function UnknownFaceTile({ face, knownNames, onUpdate }) {
+  const [assigning, setAssigning] = useState(false)
+  const [mode, setMode] = useState('select') // 'select' | 'new'
+  const [newName, setNewName] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const handleAssign = async (name) => {
+    setSaving(true)
+    try { await facesApi.rename(face.id, name); onUpdate() } catch {}
+    setSaving(false)
+    setAssigning(false)
+    setMode('select')
+    setNewName('')
+  }
+
+  return (
+    <div className="rounded-lg overflow-hidden" style={{ background: '#2A2A2A', border: '1px solid #3A3A3A' }}>
+      <div className="aspect-square"><FaceThumb faceId={face.id} /></div>
+      <div className="p-1">
+        {assigning ? (
+          mode === 'new' ? (
+            <div className="flex gap-0.5">
+              <input
+                autoFocus
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && newName.trim()) handleAssign(newName.trim())
+                  if (e.key === 'Escape') { setAssigning(false); setMode('select'); setNewName('') }
+                }}
+                placeholder="Name…"
+                className="flex-1 min-w-0 text-[10px] rounded px-1 py-0.5 focus:outline-none"
+                style={{ background: '#3A3A3A', border: '1px solid #A855F7', color: '#fff' }}
+              />
+              <button onClick={() => newName.trim() && handleAssign(newName.trim())}
+                disabled={!newName.trim() || saving}
+                className="text-[10px] px-1 rounded disabled:opacity-30"
+                style={{ background: '#A855F7', color: '#fff' }}>✓</button>
+            </div>
+          ) : (
+            <select
+              autoFocus
+              className="w-full text-[10px] rounded px-1 py-0.5 focus:outline-none"
+              style={{ background: '#3A3A3A', border: '1px solid #555', color: '#E5E7EB' }}
+              defaultValue=""
+              onChange={e => {
+                if (e.target.value === '__new__') setMode('new')
+                else if (e.target.value) handleAssign(e.target.value)
+              }}
+              onBlur={() => { if (mode === 'select') setAssigning(false) }}
+            >
+              <option value="" disabled>Who is this?</option>
+              {knownNames.map(n => <option key={n} value={n}>{n}</option>)}
+              <option value="__new__">+ New person…</option>
+            </select>
+          )
+        ) : (
+          <button onClick={() => setAssigning(true)}
+            className="w-full text-[10px] py-0.5 rounded hover:opacity-80 transition-opacity"
+            style={{ background: '#3A3A3A', color: '#A855F7' }}>
+            Assign
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function FaceManageModal({ group, knownNames, onClose, onUpdate }) {
   const [assigningId, setAssigningId] = useState(null)
+  const [assignMode, setAssignMode] = useState('select') // 'select' | 'new'
+  const [newName, setNewName] = useState('')
   const [deletingId, setDeletingId] = useState(null)
   const [clearingAll, setClearingAll] = useState(false)
+  const [renamingGroup, setRenamingGroup] = useState(false)
+  const [groupNameInput, setGroupNameInput] = useState(group.name)
+  const [renamingSaving, setRenamingSaving] = useState(false)
   const isUnknown = group.name === 'Unknown'
+
+  const startAssigning = (faceId) => {
+    setAssigningId(faceId)
+    setAssignMode('select')
+    setNewName('')
+  }
+
+  const handleAssign = async (faceId, name) => {
+    setAssigningId(null)
+    setAssignMode('select')
+    setNewName('')
+    try { await facesApi.rename(faceId, name); onUpdate() } catch {}
+  }
 
   const handleDelete = async (faceId) => {
     setDeletingId(faceId)
@@ -527,9 +737,17 @@ function FaceManageModal({ group, knownNames, onClose, onUpdate }) {
     try { await facesApi.disassociate(faceId); onUpdate() } catch {}
   }
 
-  const handleAssign = async (faceId, name) => {
-    setAssigningId(null)
-    try { await facesApi.rename(faceId, name); onUpdate() } catch {}
+  const handleRenameGroup = async () => {
+    const trimmed = groupNameInput.trim()
+    if (!trimmed || trimmed === group.name) { setRenamingGroup(false); return }
+    setRenamingSaving(true)
+    for (const face of group.faces) {
+      try { await facesApi.rename(face.id, trimmed) } catch {}
+    }
+    setRenamingSaving(false)
+    setRenamingGroup(false)
+    onUpdate()
+    onClose()
   }
 
   const handleClearAll = async () => {
@@ -555,72 +773,110 @@ function FaceManageModal({ group, knownNames, onClose, onUpdate }) {
       <div className="rounded-xl p-4 w-full max-w-md max-h-[80vh] flex flex-col"
         style={{ background: '#1A1A1A', border: '1px solid #3A3A3A' }}
         onClick={e => e.stopPropagation()}>
+
         <div className="flex items-start justify-between mb-3 shrink-0">
-          <div>
-            <h3 className="text-white font-semibold">{group.name}</h3>
-            <p className="text-xs text-gray-500">{group.faces.length} sample{group.faces.length !== 1 ? 's' : ''}</p>
+          <div className="flex-1 min-w-0">
+            {renamingGroup ? (
+              <div className="flex items-center gap-2">
+                <input
+                  autoFocus
+                  value={groupNameInput}
+                  onChange={e => setGroupNameInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleRenameGroup()
+                    if (e.key === 'Escape') { setGroupNameInput(group.name); setRenamingGroup(false) }
+                  }}
+                  className="bg-[#3A3A3A] border border-[#A855F7] rounded px-2 py-0.5 text-sm text-white focus:outline-none w-40"
+                />
+                <button onClick={handleRenameGroup} disabled={renamingSaving}
+                  className="text-xs disabled:opacity-50" style={{ color: '#A855F7' }}>
+                  {renamingSaving ? 'Saving…' : 'Save'}
+                </button>
+                <button onClick={() => { setGroupNameInput(group.name); setRenamingGroup(false) }}
+                  className="text-xs text-gray-500 hover:text-gray-300">Cancel</button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <h3 className="text-white font-semibold">{group.name}</h3>
+                {!isUnknown && (
+                  <button onClick={() => setRenamingGroup(true)}
+                    className="text-gray-600 hover:text-gray-400 transition-colors text-sm leading-none"
+                    title="Rename">✎</button>
+                )}
+              </div>
+            )}
+            <p className="text-xs text-gray-500 mt-0.5">{group.faces.length} sample{group.faces.length !== 1 ? 's' : ''}</p>
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-xl leading-none ml-4">✕</button>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-xl leading-none ml-4 shrink-0">✕</button>
         </div>
 
         <div className="overflow-y-auto flex-1">
           <div className="grid grid-cols-3 gap-2">
             {group.faces.map(face => (
               <div key={face.id} className="rounded-lg overflow-hidden" style={{ background: '#2A2A2A', border: '1px solid #3A3A3A' }}>
-                <div className="aspect-square">
-                  <FaceThumb faceId={face.id} />
-                </div>
+                <div className="aspect-square"><FaceThumb faceId={face.id} /></div>
                 <div className="p-1.5 space-y-1">
-                  <p className="text-[10px] text-gray-500">
-                    {new Date(face.created_at).toLocaleDateString()}
-                  </p>
+                  <p className="text-[10px] text-gray-500">{new Date(face.created_at).toLocaleDateString()}</p>
                   {isUnknown ? (
                     assigningId === face.id ? (
-                      <select
-                        className="w-full text-[10px] rounded px-1 py-0.5 focus:outline-none"
-                        style={{ background: '#3A3A3A', border: '1px solid #555', color: '#E5E7EB' }}
-                        defaultValue=""
-                        onChange={e => { if (e.target.value) handleAssign(face.id, e.target.value) }}
-                      >
-                        <option value="" disabled>Assign to…</option>
-                        {knownNames.map(name => <option key={name} value={name}>{name}</option>)}
-                      </select>
+                      assignMode === 'new' ? (
+                        <div className="flex gap-1">
+                          <input
+                            autoFocus
+                            value={newName}
+                            onChange={e => setNewName(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' && newName.trim()) handleAssign(face.id, newName.trim())
+                              if (e.key === 'Escape') { setAssigningId(null); setAssignMode('select'); setNewName('') }
+                            }}
+                            placeholder="Name…"
+                            className="flex-1 min-w-0 text-[10px] rounded px-1 py-0.5 focus:outline-none"
+                            style={{ background: '#3A3A3A', border: '1px solid #A855F7', color: '#fff' }}
+                          />
+                          <button onClick={() => newName.trim() && handleAssign(face.id, newName.trim())}
+                            disabled={!newName.trim()}
+                            className="text-[10px] px-1 rounded disabled:opacity-30"
+                            style={{ background: '#A855F7', color: '#fff' }}>✓</button>
+                        </div>
+                      ) : (
+                        <select
+                          className="w-full text-[10px] rounded px-1 py-0.5 focus:outline-none"
+                          style={{ background: '#3A3A3A', border: '1px solid #555', color: '#E5E7EB' }}
+                          defaultValue=""
+                          onChange={e => {
+                            if (e.target.value === '__new__') setAssignMode('new')
+                            else if (e.target.value) handleAssign(face.id, e.target.value)
+                          }}
+                        >
+                          <option value="" disabled>Assign to…</option>
+                          {knownNames.map(n => <option key={n} value={n}>{n}</option>)}
+                          <option value="__new__">+ New person…</option>
+                        </select>
+                      )
                     ) : (
                       <div className="flex gap-1">
-                        <button
-                          onClick={() => setAssigningId(face.id)}
-                          disabled={knownNames.length === 0}
-                          className="flex-1 text-[10px] py-0.5 rounded disabled:opacity-30 hover:opacity-80"
-                          style={{ background: '#3A3A3A', color: '#A855F7' }}
-                        >
+                        <button onClick={() => startAssigning(face.id)}
+                          className="flex-1 text-[10px] py-0.5 rounded hover:opacity-80"
+                          style={{ background: '#3A3A3A', color: '#A855F7' }}>
                           Assign
                         </button>
-                        <button
-                          onClick={() => handleDelete(face.id)}
-                          disabled={deletingId === face.id}
+                        <button onClick={() => handleDelete(face.id)} disabled={deletingId === face.id}
                           className="flex-1 text-[10px] py-0.5 rounded disabled:opacity-50 hover:opacity-80"
-                          style={{ background: '#3A3A3A', color: '#F87171' }}
-                        >
+                          style={{ background: '#3A3A3A', color: '#F87171' }}>
                           {deletingId === face.id ? '…' : 'Del'}
                         </button>
                       </div>
                     )
                   ) : (
                     <div className="flex gap-1">
-                      <button
-                        onClick={() => handleDisassociate(face.id)}
+                      <button onClick={() => handleDisassociate(face.id)}
                         className="flex-1 text-[10px] py-0.5 rounded hover:opacity-80"
-                        style={{ background: '#3A3A3A', color: '#9CA3AF' }}
-                        title="Move back to Unknown"
-                      >
+                        style={{ background: '#3A3A3A', color: '#9CA3AF' }} title="Move back to Unknown">
                         Remove
                       </button>
-                      <button
-                        onClick={() => handleDelete(face.id)}
-                        disabled={deletingId === face.id}
+                      <button onClick={() => handleDelete(face.id)} disabled={deletingId === face.id}
                         className="flex-1 text-[10px] py-0.5 rounded disabled:opacity-50 hover:opacity-80"
-                        style={{ background: '#3A3A3A', color: '#F87171' }}
-                      >
+                        style={{ background: '#3A3A3A', color: '#F87171' }}>
                         {deletingId === face.id ? '…' : 'Del'}
                       </button>
                     </div>
@@ -631,12 +887,9 @@ function FaceManageModal({ group, knownNames, onClose, onUpdate }) {
           </div>
         </div>
 
-        <button
-          onClick={handleClearAll}
-          disabled={clearingAll}
+        <button onClick={handleClearAll} disabled={clearingAll}
           className="mt-3 w-full text-xs py-1.5 rounded shrink-0 disabled:opacity-50 hover:opacity-80 transition-opacity"
-          style={{ background: 'rgba(239,68,68,0.15)', color: '#F87171', border: '1px solid rgba(239,68,68,0.3)' }}
-        >
+          style={{ background: 'rgba(239,68,68,0.15)', color: '#F87171', border: '1px solid rgba(239,68,68,0.3)' }}>
           {clearingAll ? 'Deleting…' : `Delete All ${group.faces.length} Samples`}
         </button>
       </div>
@@ -644,13 +897,218 @@ function FaceManageModal({ group, knownNames, onClose, onUpdate }) {
   )
 }
 
+function SystemSettingsCard({ allSettings, saveSetting, saving, saved }) {
+  return (
+    <Card title="System Settings">
+      <SettingRow label="Timezone" hint="Sets the timezone for timestamps and the Linux system clock.">
+        <div className="flex items-center gap-2">
+          <select
+            value={allSettings.timezone ?? ''}
+            onChange={e => saveSetting('timezone', e.target.value)}
+            className={`${inputCls} w-full sm:w-72`}
+            onFocus={e => e.target.style.borderColor = '#151925'}
+            onBlur={e => e.target.style.borderColor = '#484848'}
+          >
+            <option value="">— Use browser default —</option>
+            {TIMEZONES.map(tz => (
+              <option key={tz.value} value={tz.value}>{tz.label}</option>
+            ))}
+          </select>
+          {saving.timezone && <span className="text-xs text-gray-500">Saving…</span>}
+          {saved.timezone && <span className="text-xs text-green-400">Saved ✓</span>}
+        </div>
+      </SettingRow>
+    </Card>
+  )
+}
+
 function StorageTab() {
   return (
     <div className="space-y-6">
-      <SystemStatsCard />
       <StorageLocationCard />
       <ExternalDevicesCard />
       <StorageCard />
+    </div>
+  )
+}
+
+function UpdateCard() {
+  const [status, setStatus] = useState(null)
+  const [checking, setChecking] = useState(false)
+  const [installing, setInstalling] = useState(false)
+  const [installDone, setInstallDone] = useState(false)
+  const [error, setError] = useState(null)
+  const pollRef = useRef(null)
+
+  const check = useCallback(async () => {
+    setChecking(true); setError(null)
+    try {
+      const r = await systemApi.updateStatus()
+      setStatus(r.data)
+    } catch { setError('Could not reach update service') }
+    finally { setChecking(false) }
+  }, [])
+
+  useEffect(() => { check() }, [check])
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
+
+  const saveUpdateSettings = async (patch) => {
+    try {
+      await systemApi.saveUpdateSettings(patch)
+      setStatus(s => ({
+        ...s,
+        ...(patch.channel !== undefined ? { channel: patch.channel } : {}),
+        ...(patch.auto_update_enabled !== undefined ? { auto_update_enabled: patch.auto_update_enabled } : {}),
+      }))
+    } catch {}
+  }
+
+  const install = async () => {
+    setInstalling(true); setError(null)
+    try {
+      await systemApi.update()
+      const start = Date.now()
+      pollRef.current = setInterval(async () => {
+        if (Date.now() - start > 360000) {
+          clearInterval(pollRef.current); setInstalling(false); setError('Update timed out — check service manually')
+          return
+        }
+        try {
+          await systemApi.updateStatus()
+          clearInterval(pollRef.current); setInstalling(false); setInstallDone(true)
+          setTimeout(() => { setInstallDone(false); check() }, 5000)
+        } catch {}
+      }, 3000)
+    } catch (e) {
+      setInstalling(false)
+      setError(e?.response?.data?.detail || 'Update failed')
+    }
+  }
+
+  const fmtDate = (iso) => {
+    if (!iso) return null
+    try { return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) }
+    catch { return iso }
+  }
+
+  return (
+    <Card title="Application Updates">
+      {!status ? (
+        <p className="text-sm text-gray-500">{checking ? 'Checking…' : 'Loading…'}</p>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-400">Current version</span>
+            <div className="text-right">
+              <span className="text-sm text-white font-mono">{status.current_version}</span>
+              {status.last_updated && (
+                <p className="text-xs text-gray-500 mt-0.5">Updated {fmtDate(status.last_updated)}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-400">Latest available</span>
+            <div className="text-right">
+              {status.latest_version ? (
+                <>
+                  <span className={`text-sm font-mono ${status.update_available ? 'text-[#FFB800]' : 'text-white'}`}>
+                    {status.latest_version}
+                  </span>
+                  {status.release_date && (
+                    <p className="text-xs text-gray-500 mt-0.5">{fmtDate(status.release_date)}</p>
+                  )}
+                </>
+              ) : (
+                <span className="text-sm text-gray-500">—</span>
+              )}
+            </div>
+          </div>
+
+          {status.update_available && !installing && !installDone && (
+            <div className="px-3 py-2 rounded-lg text-sm" style={{ background: 'rgba(255,184,0,0.08)', color: '#FFB800', border: '1px solid rgba(255,184,0,0.2)' }}>
+              Update available
+            </div>
+          )}
+          {installDone && (
+            <div className="px-3 py-2 rounded-lg text-sm bg-green-500/10 text-green-400">
+              ✓ Update installed — service restarting…
+            </div>
+          )}
+          {error && <p className="text-sm text-red-400">{error}</p>}
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={check}
+              disabled={checking || installing}
+              className="px-3 py-1.5 text-sm rounded-md disabled:opacity-40 hover:opacity-80 transition-opacity"
+              style={{ background: '#3A3A3A', color: '#9CA3AF' }}
+            >
+              {checking ? 'Checking…' : 'Check for updates'}
+            </button>
+            {(status.update_available || status.update_in_progress) && (
+              <button
+                onClick={install}
+                disabled={installing || status.update_in_progress}
+                className="px-3 py-1.5 text-sm rounded-md font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
+                style={{ background: '#FFB800', color: '#151925' }}
+              >
+                {installing || status.update_in_progress ? 'Updating…' : 'Install update'}
+              </button>
+            )}
+          </div>
+
+          {installing && (
+            <p className="text-xs text-gray-500">
+              Updating — takes 2–4 minutes while frontend rebuilds. Service will restart automatically.
+            </p>
+          )}
+
+          <div className="pt-2 border-t border-[#2E2E2E] space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm text-white">Update channel</p>
+                <p className="text-xs text-gray-500 mt-0.5">Releases are tested and stable; main has the latest changes</p>
+              </div>
+              <select
+                value={status.channel}
+                onChange={e => saveUpdateSettings({ channel: e.target.value })}
+                className="bg-[#3A3A3A] border border-[#484848] rounded-md px-2 py-1 text-sm text-white focus:outline-none shrink-0"
+              >
+                <option value="releases">Stable releases</option>
+                <option value="main">Main branch</option>
+              </select>
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm text-white">Auto-update</p>
+                <p className="text-xs text-gray-500 mt-0.5">Checks daily at 3 AM — installs automatically if an update is found</p>
+              </div>
+              <button
+                onClick={() => saveUpdateSettings({ auto_update_enabled: !status.auto_update_enabled })}
+                className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors"
+                style={{ background: status.auto_update_enabled ? '#FFB800' : '#3A3A3A' }}
+              >
+                <span
+                  className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"
+                  style={{ transform: status.auto_update_enabled ? 'translateX(1.4rem)' : 'translateX(0.2rem)' }}
+                />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function SystemTab({ allSettings, saveSetting, saving, saved }) {
+  return (
+    <div className="space-y-6">
+      <SystemStatsCard />
+      <SystemSettingsCard allSettings={allSettings} saveSetting={saveSetting} saving={saving} saved={saved} />
+      <UpdateCard />
       <RestartCard />
     </div>
   )
@@ -688,10 +1146,20 @@ function StatBar({ label, used, total, pct, color }) {
   )
 }
 
+const REFRESH_OPTIONS = [
+  { label: '1 second',  value: 1000 },
+  { label: '3 seconds', value: 3000 },
+  { label: '5 seconds', value: 5000 },
+  { label: '10 seconds', value: 10000 },
+  { label: '15 seconds', value: 15000 },
+  { label: '30 seconds', value: 30000 },
+]
+
 function SystemStatsCard() {
   const [stats, setStats] = useState(null)
   const [error, setError] = useState(null)
-  const [autoRefresh, setAutoRefresh] = useState(false)
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [refreshInterval, setRefreshInterval] = useState(5000)
 
   const load = useCallback(() => {
     systemApi.stats()
@@ -703,9 +1171,9 @@ function SystemStatsCard() {
 
   useEffect(() => {
     if (!autoRefresh) return
-    const iv = setInterval(load, 5000)
+    const iv = setInterval(load, refreshInterval)
     return () => clearInterval(iv)
-  }, [autoRefresh, load])
+  }, [autoRefresh, refreshInterval, load])
 
   const relevantDisks = stats?.disks?.filter(d =>
     d.mountpoint === '/' || d.mountpoint === '/home/arduino' || d.mountpoint?.startsWith('/mnt/')
@@ -752,7 +1220,7 @@ function SystemStatsCard() {
               />
             ))}
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             <button
               onClick={load}
               className="text-xs transition-colors hover:text-white"
@@ -767,8 +1235,20 @@ function SystemStatsCard() {
                 onChange={e => setAutoRefresh(e.target.checked)}
                 className="accent-[#FFB800] cursor-pointer"
               />
-              <span className="text-xs" style={{ color: '#6B7280' }}>Auto-refresh (5s)</span>
+              <span className="text-xs" style={{ color: '#6B7280' }}>Auto-refresh</span>
             </label>
+            <select
+              value={refreshInterval}
+              onChange={e => setRefreshInterval(Number(e.target.value))}
+              disabled={!autoRefresh}
+              className="bg-[#3A3A3A] border border-[#484848] rounded px-2 py-1 text-xs text-white focus:outline-none disabled:opacity-40"
+              onFocus={e => e.target.style.borderColor = '#4c6e5d'}
+              onBlur={e => e.target.style.borderColor = '#484848'}
+            >
+              {REFRESH_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
           </div>
         </div>
       )}
@@ -1069,7 +1549,7 @@ function ExternalDevicesCard() {
   )
 }
 
-const PURGE_CATEGORIES = ['all', 'people', 'vehicles', 'animals', 'faces', 'other']
+const PURGE_CATEGORIES = ['all', 'people', 'faces', 'vehicles', 'animals', 'other']
 const CATEGORY_STYLE = {
   people:   { background: 'rgba(239,68,68,0.15)',   color: '#F87171' },
   vehicles: { background: 'rgba(59,130,246,0.15)',  color: '#60A5FA' },
@@ -1231,13 +1711,146 @@ function StorageCard() {
   )
 }
 
-const CONF_CATEGORIES = [
+function ModelSelector({ allSettings, onSave, saving, saved, errors }) {
+  const activeKey = allSettings.detection_model ?? allSettings.yolo_model ?? 'yolov8n'
+  const activeModel = DETECTION_MODELS.find(m => m.key === activeKey) ?? DETECTION_MODELS[0]
+  const [availability, setAvailability] = useState({})
+
+  const [classesVal, setClassesVal] = useState(() =>
+    allSettings.detection_classes ?? (activeModel.openVocab ? DEFAULT_WILDLIFE_CLASSES : '')
+  )
+
+  useEffect(() => {
+    settings.getModels()
+      .then(r => {
+        const map = {}
+        ;(r.data || []).forEach(m => { map[m.key] = m.available !== false })
+        setAvailability(map)
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    setClassesVal(allSettings.detection_classes ?? (activeModel.openVocab ? DEFAULT_WILDLIFE_CLASSES : ''))
+  }, [activeKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isBusy = saving.detection_model || saving.detection_classes
+
+  return (
+    <div className="space-y-2">
+      {DETECTION_MODELS.map(m => {
+        const isActive = activeKey === m.key
+        const isAvailable = availability[m.key] !== false
+        return (
+          <button
+            key={m.key}
+            onClick={() => isAvailable && onSave('detection_model', m.key)}
+            disabled={isBusy || !isAvailable}
+            className="w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left transition-all hover:opacity-90"
+            style={
+              !isAvailable
+                ? { background: '#1C1C1C', border: '1px solid #2A2A2A', opacity: 0.45, cursor: 'not-allowed' }
+                : isActive
+                  ? { background: 'rgba(255,184,0,0.10)', border: '1px solid rgba(255,184,0,0.6)' }
+                  : { background: '#242424', border: '1px solid #3A3A3A' }
+            }
+          >
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-medium" style={{ color: isActive ? '#FFB800' : '#fff' }}>
+                  {m.name}
+                </span>
+                <span className="text-xs px-1.5 py-0.5 rounded-full" style={SPEED_STYLE[m.speed]}>
+                  {m.speed}
+                </span>
+                {!isAvailable && (
+                  <span className="text-xs px-1.5 py-0.5 rounded-full"
+                    style={{ background: 'rgba(239,68,68,0.12)', color: '#F87171' }}>
+                    x86-64 only
+                  </span>
+                )}
+                {isAvailable && m.requiresInstall && (
+                  <span className="text-xs px-1.5 py-0.5 rounded-full"
+                    style={{ background: 'rgba(156,163,175,0.12)', color: '#6B7280' }}>
+                    Extra install
+                  </span>
+                )}
+              </div>
+              <p className="text-xs mt-0.5 leading-relaxed" style={{ color: isActive ? '#9CA3AF' : '#6B7280' }}>
+                {m.description}
+              </p>
+            </div>
+            <div
+              className="w-4 h-4 rounded-full border flex items-center justify-center shrink-0 mt-0.5 transition-all"
+              style={isActive
+                ? { borderColor: '#FFB800', background: '#FFB800' }
+                : { borderColor: '#4B5563', background: 'transparent' }
+              }
+            >
+              {isActive && <div className="w-1.5 h-1.5 rounded-full bg-[#151925]" />}
+            </div>
+          </button>
+        )
+      })}
+
+      {saving.detection_model && (
+        <p className="text-xs text-yellow-400 pt-1">Loading model — this may take a minute on first use…</p>
+      )}
+      {saved.detection_model && !saving.detection_model && (
+        <p className="text-xs text-green-400 pt-1">Model loaded ✓</p>
+      )}
+      {errors?.detection_model && !saving.detection_model && (
+        <p className="text-xs text-red-400 pt-1">{errors.detection_model}</p>
+      )}
+
+      {activeModel.openVocab && (
+        <div className="mt-3 pt-3 border-t border-[#3A3A3A]">
+          <label className="block text-xs text-gray-500 mb-1.5">
+            Detection classes <span className="text-gray-600">(comma-separated — these are what the model looks for)</span>
+          </label>
+          <textarea
+            value={classesVal}
+            onChange={e => setClassesVal(e.target.value)}
+            rows={3}
+            className="w-full rounded-md px-3 py-2 text-sm text-white focus:outline-none resize-none"
+            style={{ background: '#2A2A2A', border: '1px solid #484848' }}
+            placeholder="deer, moose, elk, bear, mountain lion, cat, dog, bird, person…"
+          />
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <button
+              onClick={() => onSave('detection_classes', classesVal)}
+              disabled={saving.detection_classes}
+              className="px-3 py-1.5 rounded-md text-xs font-medium transition-opacity hover:opacity-80 disabled:opacity-50"
+              style={{ background: '#FFB800', color: '#151925' }}
+            >
+              {saving.detection_classes ? 'Applying…' : saved.detection_classes ? 'Applied ✓' : 'Apply Classes'}
+            </button>
+            <button
+              onClick={() => {
+                setClassesVal(DEFAULT_WILDLIFE_CLASSES)
+                onSave('detection_classes', DEFAULT_WILDLIFE_CLASSES)
+              }}
+              disabled={saving.detection_classes}
+              className="px-3 py-1.5 rounded-md text-xs font-medium transition-opacity hover:opacity-80 disabled:opacity-50"
+              style={{ background: '#3A3A3A', color: '#9CA3AF' }}
+            >
+              Reset to Default
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const CONF_OBJECT_CATEGORIES = [
   { key: 'confidence_people',   label: 'People',   color: '#F87171' },
   { key: 'confidence_vehicles', label: 'Vehicles', color: '#60A5FA' },
   { key: 'confidence_animals',  label: 'Animals',  color: '#4ADE80' },
-  { key: 'confidence_faces',    label: 'Faces',    color: '#A855F7' },
   { key: 'confidence_other',    label: 'Other',    color: '#FCD34D' },
 ]
+const CONF_FACE_CATEGORY = { key: 'confidence_faces', label: 'Faces', color: '#A855F7' }
+const CONF_CATEGORIES = [...CONF_OBJECT_CATEGORIES, CONF_FACE_CATEGORY]
 
 function ConfidenceSliders({ allSettings, onSave, saving, saved }) {
   const [vals, setVals] = useState(() =>
@@ -1247,45 +1860,55 @@ function ConfidenceSliders({ allSettings, onSave, saving, saved }) {
     setVals(Object.fromEntries(CONF_CATEGORIES.map(c => [c.key, parseFloat(allSettings[c.key] ?? 0.5)])))
   }, [allSettings])
 
+  const renderSlider = ({ key, label, color }) => {
+    const enabledKey = `category_enabled_${key.replace('confidence_', '')}`
+    const defaultEnabled = key === 'confidence_faces' ? '0' : '1'
+    const enabled = (allSettings[enabledKey] ?? defaultEnabled) !== '0'
+    return (
+      <div key={key} className="flex items-center gap-3">
+        <span className="text-xs font-medium w-16 shrink-0" style={{ color: enabled ? color : '#555' }}>{label}</span>
+        <button
+          onClick={() => onSave(enabledKey, enabled ? '0' : '1')}
+          className="shrink-0 relative w-8 h-4 rounded-full transition-colors"
+          style={{ background: enabled ? color : '#3A3A3A' }}
+          title={enabled ? 'Disable category' : 'Enable category'}
+        >
+          <span
+            className="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all duration-200"
+            style={enabled ? { right: '2px' } : { left: '2px' }}
+          />
+        </button>
+        <input
+          type="range"
+          min={0.05} max={0.95} step={0.05}
+          value={vals[key]}
+          onChange={e => { if (enabled) setVals(v => ({ ...v, [key]: parseFloat(e.target.value) })) }}
+          onMouseUp={e => { if (enabled) onSave(key, parseFloat(e.target.value)) }}
+          onTouchEnd={() => { if (enabled) onSave(key, vals[key]) }}
+          disabled={!enabled}
+          className="flex-1 cursor-pointer transition-opacity"
+          style={{ opacity: enabled ? 1 : 0.25, accentColor: '#FFB800', pointerEvents: enabled ? 'auto' : 'none' }}
+        />
+        <span className="text-xs font-mono w-9 text-right shrink-0 transition-opacity"
+          style={{ color: enabled ? '#D1D5DB' : '#555', opacity: enabled ? 1 : 0.4 }}>
+          {Math.round(vals[key] * 100)}%
+        </span>
+        {(saving[key] || saving[enabledKey]) && <span className="text-xs text-gray-500 shrink-0">…</span>}
+        {(saved[key] || saved[enabledKey]) && !saving[key] && !saving[enabledKey] && <span className="text-xs text-green-400 shrink-0">✓</span>}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-3">
-      {CONF_CATEGORIES.map(({ key, label, color }) => {
-        const enabledKey = `category_enabled_${key.replace('confidence_', '')}`
-        const enabled = (allSettings[enabledKey] ?? '1') !== '0'
-        return (
-          <div key={key} className="flex items-center gap-3">
-            <span className="text-xs font-medium w-16 shrink-0" style={{ color: enabled ? color : '#555' }}>{label}</span>
-            <button
-              onClick={() => onSave(enabledKey, enabled ? '0' : '1')}
-              className="shrink-0 relative w-8 h-4 rounded-full transition-colors"
-              style={{ background: enabled ? color : '#3A3A3A' }}
-              title={enabled ? 'Disable category' : 'Enable category'}
-            >
-              <span
-                className="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all duration-200"
-                style={enabled ? { right: '2px' } : { left: '2px' }}
-              />
-            </button>
-            <input
-              type="range"
-              min={0.05} max={0.95} step={0.05}
-              value={vals[key]}
-              onChange={e => { if (enabled) setVals(v => ({ ...v, [key]: parseFloat(e.target.value) })) }}
-              onMouseUp={e => { if (enabled) onSave(key, parseFloat(e.target.value)) }}
-              onTouchEnd={() => { if (enabled) onSave(key, vals[key]) }}
-              disabled={!enabled}
-              className="flex-1 cursor-pointer transition-opacity"
-              style={{ opacity: enabled ? 1 : 0.25, accentColor: '#FFB800', pointerEvents: enabled ? 'auto' : 'none' }}
-            />
-            <span className="text-xs font-mono w-9 text-right shrink-0 transition-opacity"
-              style={{ color: enabled ? '#D1D5DB' : '#555', opacity: enabled ? 1 : 0.4 }}>
-              {Math.round(vals[key] * 100)}%
-            </span>
-            {(saving[key] || saving[enabledKey]) && <span className="text-xs text-gray-500 shrink-0">…</span>}
-            {(saved[key] || saved[enabledKey]) && !saving[key] && !saving[enabledKey] && <span className="text-xs text-green-400 shrink-0">✓</span>}
-          </div>
-        )
-      })}
+      {CONF_OBJECT_CATEGORIES.map(renderSlider)}
+
+      <div className="pt-2 mt-1 border-t border-[#3A3A3A]">
+        <p className="text-xs text-gray-500 mb-2.5">
+          Face detection runs alongside YOLO and shares CPU resources. For best results on smaller ARM processors, run faces <span className="text-gray-300">on its own</span> with other categories disabled.
+        </p>
+        {renderSlider(CONF_FACE_CATEGORY)}
+      </div>
     </div>
   )
 }

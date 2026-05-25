@@ -73,10 +73,18 @@ def _get_or_create_camera_id(db: sqlite3.Connection, usb_id: str) -> tuple[int, 
     return cam_id, False
 
 
+def _get_present_usb_ids() -> set:
+    """Return the set of USB IDs for all currently attached /dev/video* devices."""
+    present = set()
+    for path in sorted(glob.glob("/dev/video*")):
+        present.add(_get_usb_id(path))
+    return present
+
+
 def _build_camera_list(db: sqlite3.Connection) -> list:
     """Return the full camera list (non-deleted) with live pipeline state overlaid."""
     db_cams = db.execute(
-        "SELECT camera_id, usb_id, name, last_seen FROM cameras WHERE deleted=0 ORDER BY camera_id"
+        "SELECT camera_id, usb_id, name, last_seen, enabled FROM cameras WHERE deleted=0 ORDER BY camera_id"
     ).fetchall()
     event_counts = {
         r['camera_id']: r['cnt']
@@ -85,6 +93,7 @@ def _build_camera_list(db: sqlite3.Connection) -> list:
             "WHERE event_id IS NOT NULL GROUP BY camera_id"
         ).fetchall()
     }
+    present_usb_ids = _get_present_usb_ids()
     live = {}
     if _pipeline is not None:
         with _pipeline._lock:
@@ -94,14 +103,21 @@ def _build_camera_list(db: sqlite3.Connection) -> list:
     for row in db_cams:
         cam_id = row['camera_id']
         live_cam = live.get(cam_id)
+        alive = live_cam.is_alive() if live_cam else False
+        res_w, res_h, res_fps = live_cam.resolution if (live_cam and alive) else (None, None, None)
         result.append({
             "id": cam_id,
-            "alive": live_cam.is_alive() if live_cam else False,
+            "alive": alive,
+            "present": row['usb_id'] in present_usb_ids,
             "device": live_cam.device_path if live_cam else None,
             "usb_id": row['usb_id'],
             "name": row['name'] or '',
             "last_seen": row['last_seen'],
             "event_count": event_counts.get(cam_id, 0),
+            "enabled": bool(row['enabled']),
+            "width": res_w,
+            "height": res_h,
+            "stream_fps": res_fps,
         })
     return result
 
@@ -140,7 +156,8 @@ async def scan_and_refresh(db: sqlite3.Connection = None) -> list:
         _db = db
 
     loop = asyncio.get_event_loop()
-    new_captures = []
+    # pending: (cap, cam_id, was_deleted) — started but not yet verified alive
+    pending = []
 
     try:
         for path in sorted(glob.glob("/dev/video*")):
@@ -153,8 +170,32 @@ async def scan_and_refresh(db: sqlite3.Connection = None) -> list:
             if cam_id in existing_cam_ids:
                 continue
 
+            # Don't start a camera that the user has disabled
+            enabled_row = _db.execute(
+                "SELECT enabled FROM cameras WHERE camera_id=?", (cam_id,)
+            ).fetchone()
+            if enabled_row and not enabled_row['enabled']:
+                continue
+
             ok = await loop.run_in_executor(None, _probe_device, path)
             if ok:
+                # Let V4L2 settle after _probe_device released the device
+                await asyncio.sleep(0.3)
+                dev_idx = int(path.replace("/dev/video", ""))
+                w, h, fps = _pipeline._camera_quality()
+                cap = CameraCapture(camera_id=cam_id, device_index=dev_idx, usb_id=usb_id,
+                                    width=w, height=h, fps=fps)
+                cap.start()
+                pending.append((cap, cam_id, was_deleted))
+                existing_cam_ids.add(cam_id)
+
+        # Wait for capture threads to open the device and read first frame
+        if pending:
+            await asyncio.sleep(1.0)
+
+        new_captures = []
+        for cap, cam_id, was_deleted in pending:
+            if cap.is_alive():
                 if was_deleted:
                     now = datetime.now(timezone.utc).isoformat()
                     _db.execute(
@@ -162,11 +203,9 @@ async def scan_and_refresh(db: sqlite3.Connection = None) -> list:
                         (now, cam_id),
                     )
                     _db.commit()
-                dev_idx = int(path.replace("/dev/video", ""))
-                cap = CameraCapture(camera_id=cam_id, device_index=dev_idx, usb_id=usb_id)
-                cap.start()
                 new_captures.append(cap)
-                existing_cam_ids.add(cam_id)
+            else:
+                cap.stop()
     finally:
         if owned_db:
             _db.close()
@@ -186,6 +225,40 @@ def list_cameras(db: sqlite3.Connection = Depends(get_db), _=Depends(require_aut
 async def refresh_cameras(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
     await scan_and_refresh(db)
     return _build_camera_list(db)
+
+
+@router.post("/{camera_id}/enabled")
+async def set_camera_enabled(
+    camera_id: int,
+    enabled: bool,
+    db: sqlite3.Connection = Depends(get_db),
+    _=Depends(require_auth),
+):
+    db.execute("UPDATE cameras SET enabled=? WHERE camera_id=?", (1 if enabled else 0, camera_id))
+    db.commit()
+    if _pipeline is None:
+        return {"camera_id": camera_id, "enabled": enabled}
+    loop = asyncio.get_event_loop()
+    if not enabled:
+        await loop.run_in_executor(None, _pipeline.disable_camera, camera_id)
+    else:
+        row = db.execute(
+            "SELECT camera_id, usb_id FROM cameras WHERE camera_id=? AND deleted=0", (camera_id,)
+        ).fetchone()
+        if row:
+            # Find the device index from the live path or probe /dev/video*
+            import glob as _glob
+            device_index = None
+            for path in sorted(_glob.glob("/dev/video*")):
+                usb = _get_usb_id(path)
+                if usb == row['usb_id']:
+                    device_index = int(path.replace("/dev/video", ""))
+                    break
+            if device_index is not None:
+                await loop.run_in_executor(
+                    None, _pipeline.enable_camera, camera_id, device_index, row['usb_id']
+                )
+    return {"camera_id": camera_id, "enabled": enabled}
 
 
 @router.patch("/{camera_id}/name")

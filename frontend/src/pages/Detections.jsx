@@ -11,7 +11,7 @@ const CATEGORY_STYLE = {
   faces:    { background: 'rgba(168,85,247,0.15)',  color: '#C084FC' },
   other:    { background: 'rgba(245,158,11,0.15)',  color: '#FCD34D' },
 }
-const CATEGORIES = ['all', 'people', 'vehicles', 'animals', 'faces', 'other']
+const CATEGORIES = ['all', 'people', 'faces', 'vehicles', 'animals', 'other']
 const PAGE_SIZE = 20
 
 function useBlobUrl(detectionId) {
@@ -62,9 +62,10 @@ function Lightbox({ src, onClose }) {
   )
 }
 
-function EventRow({ ev, cameraNames }) {
+function EventRow({ ev, cameraNames, onDelete }) {
   const [expanded, setExpanded] = useState(false)
   const [lightbox, setLightbox] = useState(null)
+  const [deleting, setDeleting] = useState(false)
   const ids = ev.detection_ids || []
   const previewIds = ids.slice(0, 4)
   const hasMore = ids.length > 4
@@ -115,6 +116,19 @@ function EventRow({ ev, cameraNames }) {
               <Link to={`/events/${ev.event_id}`} className="text-xs font-medium hover:underline" style={{ color: '#FFB800' }}>
                 View event →
               </Link>
+              <button
+                disabled={deleting}
+                onClick={() => {
+                  if (!window.confirm('Delete this event and all its images?')) return
+                  setDeleting(true)
+                  detections.deleteEvent(ev.event_id)
+                    .then(() => onDelete(ev.event_id))
+                    .catch(() => setDeleting(false))
+                }}
+                className="text-xs text-red-400 hover:text-red-300 disabled:opacity-40 transition-colors"
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
             </div>
           </div>
         </div>
@@ -236,7 +250,12 @@ export default function Detections() {
           <p className="text-gray-500 text-sm py-4 text-center">No detection events found.</p>
         )}
         {events.map(ev => (
-          <EventRow key={ev.event_id} ev={ev} cameraNames={cameraNames} />
+          <EventRow
+            key={ev.event_id}
+            ev={ev}
+            cameraNames={cameraNames}
+            onDelete={(id) => setEvents(prev => prev.filter(e => e.event_id !== id))}
+          />
         ))}
 
         {!loading && totalPages > 0 && (

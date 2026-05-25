@@ -26,7 +26,17 @@ const STATE_STYLE = {
   motion:   { label: 'Motion',       bg: '#78350f', color: '#FCD34D' },
   cooldown: { label: 'Cooldown',     bg: '#1e3a5f', color: '#93C5FD' },
   stuck:    { label: 'Stuck!',       bg: '#7f1d1d', color: '#FCA5A5' },
-  timeout:  { label: 'YOLO Timeout', bg: '#581c87', color: '#D8B4FE' },
+  timeout:  { label: 'AI Timeout',   bg: '#581c87', color: '#D8B4FE' },
+}
+
+const MODEL_NAMES = {
+  'yolov8n':        'YOLOv8 Nano',
+  'yolov8s':        'YOLOv8 Small',
+  'yolov8m':        'YOLOv8 Medium',
+  'yolov8s-worldv2':'YOLOWorld',
+  'megadetector':   'MegaDetector',
+  'owlv2':          'OWLv2',
+  'grounding-dino': 'Grounding DINO',
 }
 
 function DebugPanel({ info }) {
@@ -38,25 +48,29 @@ function DebugPanel({ info }) {
     )
   }
   const s = STATE_STYLE[info.state] || STATE_STYLE.idle
+  const modelName = MODEL_NAMES[info.model_key] || info.model_key || 'AI'
   return (
     <div className="rounded-lg bg-[#1A1A1A] border border-[#3A3A3A] px-3 py-2.5 font-mono text-xs space-y-1.5">
       <div className="flex items-center justify-between">
         <span className="text-gray-500 uppercase tracking-wider text-[10px]">AI Debug</span>
-        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold" style={{ background: s.bg, color: s.color }}>
-          {s.label}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-gray-500 text-[10px]">{modelName}</span>
+          <span className="px-2 py-0.5 rounded-full text-[11px] font-bold" style={{ background: s.bg, color: s.color }}>
+            {s.label}
+          </span>
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
         <Row label="Motion" value={info.has_motion
           ? `Yes · ${info.motion_secs}s${info.stuck_secs ? ` (reset at ${info.stuck_secs}s)` : ''}`
           : 'No'} />
         <Row label="Cooldown left" value={info.cooldown_remaining > 0 ? `${info.cooldown_remaining}s` : '—'} />
-        <Row label="YOLO latency" value={info.last_yolo_ms != null ? `${info.last_yolo_ms} ms` : '—'} />
-        <Row label="YOLO last ran" value={info.last_yolo_secs_ago != null ? `${info.last_yolo_secs_ago}s ago` : 'never'} />
+        <Row label={`${modelName} latency`} value={info.last_yolo_ms != null ? `${info.last_yolo_ms} ms` : '—'} />
+        <Row label={`${modelName} last ran`} value={info.last_yolo_secs_ago != null ? `${info.last_yolo_secs_ago}s ago` : 'never'} />
         <Row label="Active detections" value={info.active_detections ?? 0} />
         <Row label="Auto-resets" value={info.auto_resets ?? 0} />
         {(info.yolo_timeouts ?? 0) > 0 && (
-          <Row label="YOLO timeouts" value={<span style={{ color: '#D8B4FE' }}>{info.yolo_timeouts}</span>} />
+          <Row label={`${modelName} timeouts`} value={<span style={{ color: '#D8B4FE' }}>{info.yolo_timeouts}</span>} />
         )}
       </div>
     </div>
@@ -130,7 +144,30 @@ function CameraDetections({ camId }) {
   )
 }
 
-function CameraFeed({ cam, onNameSaved }) {
+function OfflineToggle({ cam, onEnabledChange }) {
+  const [toggling, setToggling] = useState(false)
+  return (
+    <button
+      disabled={toggling}
+      onClick={async () => {
+        setToggling(true)
+        await cameras.setEnabled(cam.id, !cam.enabled).catch(() => {})
+        onEnabledChange()
+        setToggling(false)
+      }}
+      className="relative w-9 h-5 rounded-full transition-colors shrink-0 disabled:opacity-50"
+      style={{ background: cam.enabled ? '#22C55E' : '#3A3A3A' }}
+      title={cam.enabled ? 'Disable camera' : 'Enable camera'}
+    >
+      <span
+        className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all"
+        style={{ left: cam.enabled ? '1.125rem' : '0.125rem' }}
+      />
+    </button>
+  )
+}
+
+function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
   const imgRef = useRef(null)
   const wsRef = useRef(null)
   const [overlay, setOverlay] = useState(true)
@@ -154,6 +191,9 @@ function CameraFeed({ cam, onNameSaved }) {
   const [showDetections, setShowDetections] = useState(false)
   const [debugMode, setDebugMode] = useState(false)
   const [debugInfo, setDebugInfo] = useState(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [togglingEnabled, setTogglingEnabled] = useState(false)
+  const videoContainerRef = useRef(null)
 
   const sendFilter = useCallback((hidden) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -250,41 +290,80 @@ function CameraFeed({ cam, onNameSaved }) {
     setTimeout(() => setResetDone(false), 2000)
   }
 
+  const handleFullscreen = useCallback(() => {
+    const el = videoContainerRef.current
+    if (!el) return
+    if (!document.fullscreenElement) {
+      el.requestFullscreen().catch(() => {})
+    } else {
+      document.exitFullscreen().catch(() => {})
+    }
+  }, [])
+
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', handler)
+    return () => document.removeEventListener('fullscreenchange', handler)
+  }, [])
+
   const displayName = cam.name || `Camera ${cam.id}`
 
   return (
     <Card className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2 min-w-0">
-          {editingName ? (
-            <input
-              autoFocus
-              value={name}
-              onChange={e => setName(e.target.value)}
-              onBlur={saveName}
-              onKeyDown={e => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') { setName(cam.name || ''); setEditingName(false) } }}
-              className="bg-[#3A3A3A] border border-[#4c6e5d] rounded px-2 py-0.5 text-sm text-white focus:outline-none w-36"
-            />
-          ) : (
-            <button
-              onClick={() => setEditingName(true)}
-              className="font-semibold text-white hover:text-[#FFB800] transition-colors text-left truncate"
-              title="Click to rename"
-            >
-              {displayName}
-            </button>
-          )}
-          <Badge label={reloading ? 'Reloading' : connected ? 'Live' : 'Offline'} color={reloading ? 'yellow' : connected ? 'green' : 'red'} />
-          {connected && !reloading && <span className="text-xs text-gray-500">{fps} fps</span>}
-          {cam.device && <span className="text-xs text-gray-600 font-mono hidden sm:inline">{cam.device}</span>}
-          {cam.usb_id && cam.usb_id !== cam.device.replace('/dev/', '') && (
-            <span className="text-xs text-gray-700 hidden md:inline truncate max-w-[180px]" title={cam.usb_id}>
-              {cam.usb_id.replace(/-video-index\d+$/, '')}
-            </span>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            {editingName ? (
+              <input
+                autoFocus
+                value={name}
+                onChange={e => setName(e.target.value)}
+                onBlur={saveName}
+                onKeyDown={e => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') { setName(cam.name || ''); setEditingName(false) } }}
+                className="bg-[#3A3A3A] border border-[#4c6e5d] rounded px-2 py-0.5 text-sm text-white focus:outline-none w-36"
+              />
+            ) : (
+              <button
+                onClick={() => setEditingName(true)}
+                className="font-semibold text-white hover:text-[#FFB800] transition-colors text-left truncate"
+                title="Click to rename"
+              >
+                {displayName}
+              </button>
+            )}
+            <Badge label={reloading ? 'Reloading' : connected ? 'Live' : 'Offline'} color={reloading ? 'yellow' : connected ? 'green' : 'red'} />
+            {connected && !reloading && <span className="text-xs text-gray-500">{fps} fps</span>}
+          </div>
+          {(cam.device || cam.usb_id) && (
+            <div className="flex items-center gap-2 flex-wrap">
+              {cam.device && <span className="text-xs text-gray-600 font-mono">{cam.device}</span>}
+              {cam.usb_id && cam.usb_id !== cam.device?.replace('/dev/', '') && (
+                <span className="text-xs text-gray-700 truncate max-w-[220px]" title={cam.usb_id}>
+                  {cam.usb_id.replace(/-video-index\d+$/, '')}
+                </span>
+              )}
+            </div>
           )}
         </div>
 
         <div className="flex items-center gap-1.5 flex-wrap">
+          <button
+            disabled={togglingEnabled}
+            onClick={async () => {
+              setTogglingEnabled(true)
+              await cameras.setEnabled(cam.id, !cam.enabled).catch(() => {})
+              onEnabledChange()
+              setTogglingEnabled(false)
+            }}
+            className="relative w-9 h-5 rounded-full transition-colors shrink-0 disabled:opacity-50"
+            style={{ background: cam.enabled ? '#22C55E' : '#3A3A3A' }}
+            title={cam.enabled ? 'Disable camera' : 'Enable camera'}
+          >
+            <span
+              className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all"
+              style={{ left: cam.enabled ? '1.125rem' : '0.125rem' }}
+            />
+          </button>
           <button
             onClick={handleOverlayToggle}
             className="px-2.5 py-1 rounded text-xs font-medium transition-opacity hover:opacity-80"
@@ -336,13 +415,35 @@ function CameraFeed({ cam, onNameSaved }) {
         </div>
       )}
 
-      <div className="relative bg-black rounded-lg overflow-hidden aspect-video">
+      <div ref={videoContainerRef} className="group relative bg-black rounded-lg overflow-hidden aspect-video">
         {!connected && (
           <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-sm">
             {reloading ? 'Reloading camera…' : 'Connecting...'}
           </div>
         )}
         <img ref={imgRef} alt={displayName} className="w-full h-full object-contain" />
+        {connected && cam.width && cam.height && (
+          <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-black/50 text-white text-xs font-mono opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity pointer-events-none select-none">
+            {cam.width}×{cam.height}{cam.stream_fps ? ` · ${cam.stream_fps}fps` : ''}
+          </div>
+        )}
+        <button
+          onClick={handleFullscreen}
+          className="absolute bottom-2 right-2 p-1.5 rounded bg-black/50 text-white opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity hover:bg-black/70"
+          title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+        >
+          {isFullscreen ? (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M15 9h4.5M15 9V4.5M15 9l5.25-5.25M9 15H4.5M9 15v4.5M9 15l-5.25 5.25M15 15h4.5M15 15v4.5M15 15l5.25 5.25" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+            </svg>
+          )}
+        </button>
       </div>
 
       {debugMode && (
@@ -407,6 +508,8 @@ export default function Cameras() {
     setCams(prev => prev.map(c => c.id === id ? { ...c, name: newName } : c))
   }
 
+  const handleEnabledChange = useCallback(() => { loadCameras() }, [loadCameras])
+
   if (loading) return <div className="text-gray-500 text-sm">Loading cameras...</div>
 
   return (
@@ -443,21 +546,26 @@ export default function Cameras() {
       )}
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        {cams.map(cam => (
-          cam.alive
-            ? <CameraFeed key={cam.id} cam={cam} onNameSaved={handleNameSaved} />
-            : (
+        {cams.map(cam => {
+          if (cam.alive) {
+            return <CameraFeed key={cam.id} cam={cam} onNameSaved={handleNameSaved} onEnabledChange={handleEnabledChange} />
+          }
+          if (cam.present) {
+            return (
               <div key={cam.id} className="bg-[#2E2E2E] rounded-xl p-4 border border-[#3A3A3A] flex items-center justify-between gap-4">
                 <div>
                   <p className="text-sm font-medium text-white">{cam.name || `Camera ${cam.id}`}</p>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {cam.device ? `${cam.device} — ` : ''}{cam.usb_id?.replace(/-video-index\d+$/, '') || 'Unknown device'} — disconnected
+                    {cam.usb_id?.replace(/-video-index\d+$/, '') || 'Unknown device'} — {cam.enabled ? 'connecting…' : 'disabled'}
                   </p>
                   {cam.last_seen && <p className="text-xs text-gray-700 mt-0.5">Last seen {new Date(cam.last_seen).toLocaleString()}</p>}
                 </div>
+                <OfflineToggle cam={cam} onEnabledChange={handleEnabledChange} />
               </div>
             )
-        ))}
+          }
+          return null
+        })}
       </div>
     </div>
   )

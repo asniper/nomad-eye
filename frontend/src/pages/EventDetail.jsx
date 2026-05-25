@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import Card from '../components/Card'
 import { detections, cameras } from '../api/client'
 import { formatDateTime } from '../utils/dates'
@@ -60,11 +60,13 @@ function Lightbox({ src, onClose }) {
 
 export default function EventDetail() {
   const { eventId } = useParams()
+  const navigate = useNavigate()
   const [event, setEvent] = useState(null)
   const [cameraName, setCameraName] = useState(null)
   const [loading, setLoading] = useState(true)
   const [lightbox, setLightbox] = useState(null)
   const [error, setError] = useState(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     detections.event(eventId)
@@ -102,6 +104,19 @@ export default function EventDetail() {
       <div className="flex items-center gap-3 flex-wrap">
         <Link to="/detections" className="text-sm hover:underline" style={{ color: '#FFB800' }}>← Detections</Link>
         <h2 className="text-2xl font-bold text-white capitalize">{event.label} Event</h2>
+        <button
+          disabled={deleting}
+          onClick={() => {
+            if (!window.confirm('Delete this event and all its images?')) return
+            setDeleting(true)
+            detections.deleteEvent(eventId)
+              .then(() => navigate('/detections'))
+              .catch(() => setDeleting(false))
+          }}
+          className="ml-auto px-3 py-1.5 rounded-md text-xs font-medium bg-red-900/40 text-red-400 hover:bg-red-900/60 disabled:opacity-40 transition-colors"
+        >
+          {deleting ? 'Deleting…' : 'Delete Event'}
+        </button>
       </div>
 
       <Card>

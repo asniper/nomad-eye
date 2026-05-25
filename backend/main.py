@@ -22,6 +22,7 @@ from api.routes import cameras as cam_router
 from api.routes import cameras, detections, notifications, network, settings, auth, status, captive, setup
 from api.routes import storage
 from api.routes import system
+from api.routes.system import start_auto_update_scheduler
 from api.routes import faces as faces_router
 from api.routes import faces
 from storage.manager import auto_mount_primary
@@ -33,8 +34,14 @@ async def lifespan(app: FastAPI):
 
     _cfg = get_app_settings()
     db = sqlite3.connect(_cfg.db_path)
-    row = db.execute("SELECT value FROM app_config WHERE key='yolo_model'").fetchone()
-    initial_model = f"{row[0]}.pt" if row else "yolov8n.pt"
+    det_row = db.execute("SELECT value FROM app_config WHERE key='detection_model'").fetchone()
+    yolo_row = db.execute("SELECT value FROM app_config WHERE key='yolo_model'").fetchone()
+    if det_row:
+        initial_model = det_row[0]
+    elif yolo_row:
+        initial_model = f"{yolo_row[0]}.pt"
+    else:
+        initial_model = 'yolov8n'
     default_conf = _cfg.detection_confidence
     conf_rows = db.execute(
         "SELECT key, value FROM app_config WHERE key IN ('confidence_people','confidence_vehicles','confidence_animals','confidence_other')"
@@ -45,15 +52,34 @@ async def lifespan(app: FastAPI):
     enabled_rows = db.execute(
         "SELECT key, value FROM app_config WHERE key LIKE 'category_enabled_%'"
     ).fetchall()
+    ai_row = db.execute("SELECT value FROM app_config WHERE key='ai_enabled'").fetchone()
+    initial_ai_enabled = (ai_row[0] != '0') if ai_row else True
+    quality_rows = db.execute(
+        "SELECT key, value FROM app_config WHERE key IN ('video_width','video_height','video_fps')"
+    ).fetchall()
+    qkv = {r[0]: r[1] for r in quality_rows}
+    motion_row = db.execute("SELECT value FROM app_config WHERE key='motion_threshold'").fetchone()
+    initial_motion_threshold = int(motion_row[0]) if motion_row else None
     db.close()
 
     pipeline = DetectionPipeline([], model_name=initial_model,
                                  confidences=initial_confidences if initial_confidences else None)
     pipeline.set_face_confidence(initial_face_confidence)
+    if initial_motion_threshold is not None:
+        pipeline.set_motion_threshold(initial_motion_threshold)
     for row in enabled_rows:
         category = row[0][len('category_enabled_'):]
         if row[1] == '0':
             pipeline.set_category_enabled(category, False)
+    pipeline.set_ai_enabled(initial_ai_enabled)
+    try:
+        pipeline.set_video_quality(
+            int(qkv.get('video_width', 1280)),
+            int(qkv.get('video_height', 720)),
+            int(qkv.get('video_fps', 15)),
+        )
+    except (ValueError, KeyError):
+        pass
     pipeline.start()
     cam_router.set_pipeline(pipeline)
     settings.set_pipeline(pipeline)
@@ -65,11 +91,24 @@ async def lifespan(app: FastAPI):
     # Mount primary external storage device if configured
     auto_mount_primary()
 
+    start_auto_update_scheduler()
+
     # Discover cameras on startup
     await cam_router.scan_and_refresh()
 
+    async def _auto_scan_loop():
+        while True:
+            await asyncio.sleep(30)
+            try:
+                await cam_router.scan_and_refresh()
+            except Exception:
+                pass
+
+    scan_task = asyncio.create_task(_auto_scan_loop())
+
     yield
 
+    scan_task.cancel()
     pipeline.stop()
     queue_proc.stop()
     for cap in list(pipeline._cameras):

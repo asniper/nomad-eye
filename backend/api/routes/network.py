@@ -1,4 +1,6 @@
 import asyncio
+import json
+import subprocess
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from networking.manager import (
@@ -132,3 +134,64 @@ def ap_start(_=Depends(require_auth)):
 def ap_stop(_=Depends(require_auth)):
     stop_access_point()
     return {"ap": "stopped", "active": _is_ap_active()}
+
+
+@router.post("/tailscale/auth-url")
+def tailscale_auth_url(_=Depends(require_auth)):
+    import re
+    try:
+        result = subprocess.run(
+            ['tailscale', 'up'],
+            capture_output=True, text=True, timeout=8,
+        )
+        combined = result.stdout + result.stderr
+    except subprocess.TimeoutExpired as e:
+        s = e.stdout or ''
+        err = e.stderr or ''
+        if isinstance(s, bytes): s = s.decode('utf-8', errors='replace')
+        if isinstance(err, bytes): err = err.decode('utf-8', errors='replace')
+        combined = s + err
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail='Tailscale is not installed')
+
+    match = re.search(r'https://login\.tailscale\.com/a/\w+', combined)
+    if match:
+        return {"auth_url": match.group(0), "already_connected": False}
+
+    try:
+        r2 = subprocess.run(['tailscale', 'status', '--json'], capture_output=True, text=True, timeout=5)
+        data = json.loads(r2.stdout)
+        if data.get('BackendState') == 'Running':
+            return {"auth_url": None, "already_connected": True}
+    except Exception:
+        pass
+
+    raise HTTPException(status_code=500, detail='Could not get auth URL. Tailscale may not be running.')
+
+
+@router.get("/tailscale")
+def tailscale_status(_=Depends(require_auth)):
+    try:
+        r = subprocess.run(['tailscale', 'status', '--json'],
+                           capture_output=True, text=True, timeout=5)
+    except FileNotFoundError:
+        return {"installed": False, "connected": False, "ip": None, "hostname": None, "dns_name": None}
+    except Exception:
+        return {"installed": True, "connected": False, "ip": None, "hostname": None, "dns_name": None}
+    if r.returncode != 0:
+        return {"installed": True, "connected": False, "ip": None, "hostname": None, "dns_name": None}
+    try:
+        data = json.loads(r.stdout)
+        self_node = data.get('Self', {})
+        ips = self_node.get('TailscaleIPs', [])
+        ipv4 = next((ip for ip in ips if ':' not in ip), None)
+        dns_name = self_node.get('DNSName', '').rstrip('.')
+        return {
+            "installed": True,
+            "connected": data.get('BackendState') == 'Running',
+            "ip": ipv4,
+            "hostname": self_node.get('HostName', ''),
+            "dns_name": dns_name,
+        }
+    except Exception:
+        return {"installed": True, "connected": False, "ip": None, "hostname": None, "dns_name": None}

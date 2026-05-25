@@ -21,6 +21,7 @@ export const cameras = {
   deletePermanent: (id) => api.delete(`/cameras/${id}/permanent`),
   reload: (id) => api.post(`/cameras/${id}/reload`),
   resetTracking: (id) => api.post(`/cameras/${id}/reset-tracking`),
+  setEnabled: (id, enabled) => api.post(`/cameras/${id}/enabled?enabled=${enabled}`),
 }
 
 export const detections = {
@@ -30,6 +31,7 @@ export const detections = {
   image: (id) => api.get(`/detections/${id}/image`, { responseType: 'blob' }),
   storage: () => api.get('/detections/storage'),
   purge: (category, images_only) => api.delete('/detections/purge', { data: { category, images_only } }),
+  deleteEvent: (event_id) => api.delete(`/detections/events/${event_id}`),
 }
 
 export const notifications = {
@@ -56,11 +58,14 @@ export const network = {
   deleteKnown: (ssid) => api.delete(`/network/known/${encodeURIComponent(ssid)}`),
   apStart: () => api.post('/network/ap/start'),
   apStop: () => api.post('/network/ap/stop'),
+  tailscale: () => api.get('/network/tailscale'),
+  tailscaleAuthUrl: () => api.post('/network/tailscale/auth-url'),
 }
 
 export const settings = {
   getAll: () => api.get('/settings/'),
   set: (key, value) => api.post('/settings/', { key, value: String(value) }),
+  getModels: () => api.get('/settings/models'),
 }
 
 export const status = {
@@ -72,6 +77,9 @@ export const system = {
   stats: () => api.get('/system/stats'),
   restart: () => api.post('/system/restart'),
   reboot: () => api.post('/system/reboot'),
+  updateStatus: () => api.get('/system/update-status'),
+  update: () => api.post('/system/update'),
+  saveUpdateSettings: (data) => api.post('/system/update-settings', data),
 }
 
 export const faces = {

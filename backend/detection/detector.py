@@ -1,4 +1,5 @@
 import os
+import cv2
 import numpy as np
 from dataclasses import dataclass
 from typing import List
@@ -13,7 +14,7 @@ CATEGORIES = {
     "bus": "vehicles", "truck": "vehicles",
     "dog": "animals", "cat": "animals", "bird": "animals",
     "horse": "animals", "sheep": "animals", "cow": "animals",
-    "bear": "animals", "deer": "animals", "rabbit": "animals",
+    "bear": "animals",
 }
 
 # faces category is handled by FaceRecognizer, not YOLO
@@ -36,16 +37,124 @@ class Detection:
     confidence: float
     bbox: tuple
 
-_CATEGORIES_LIST = ["people", "vehicles", "animals", "other", "faces"]
+_CATEGORIES_LIST = ["people", "faces", "vehicles", "animals", "other"]
+_CATEGORY_PRIORITY = {c: i for i, c in enumerate(_CATEGORIES_LIST)}
+
+DEFAULT_WILDLIFE_CLASSES = [
+    "deer", "moose", "elk", "bear", "mountain lion", "bobcat", "coyote",
+    "fox", "raccoon", "skunk", "rabbit", "squirrel", "groundhog",
+    "muskrat", "ferret", "cat", "dog", "bird", "person",
+    "car", "truck", "bus", "motorcycle", "bicycle", "van", "ATV", "snowmobile",
+]
+
+_PEOPLE_TERMS = {'person', 'people', 'human', 'man', 'woman', 'child', 'pedestrian', 'individual'}
+_VEHICLE_TERMS = {'car', 'truck', 'bus', 'motorcycle', 'bicycle', 'van', 'vehicle', 'automobile', 'motorbike', 'bike', 'atv', 'snowmobile', 'quad', 'sled'}
+
+MODELS = [
+    {
+        "key": "yolov8n",
+        "name": "YOLOv8 Nano",
+        "speed": "Fast",
+        "description": "Fastest standard model. Best for limited CPU. Detects people, vehicles, and common animals: cat, dog, bird, bear, horse, cow, sheep. Does not detect deer, moose, or most North American wildlife.",
+        "open_vocab": False,
+        "requires_install": False,
+        "default_classes": None,
+    },
+    {
+        "key": "yolov8s",
+        "name": "YOLOv8 Small",
+        "speed": "Medium",
+        "description": "More accurate than Nano with the same COCO-80 classes. Better at detecting small or distant subjects.",
+        "open_vocab": False,
+        "requires_install": False,
+        "default_classes": None,
+    },
+    {
+        "key": "yolov8m",
+        "name": "YOLOv8 Medium",
+        "speed": "Slow",
+        "description": "Highest accuracy of the standard YOLO line. Same COCO-80 classes. Significantly slower on ARM — best with a fast CPU.",
+        "open_vocab": False,
+        "requires_install": False,
+        "default_classes": None,
+    },
+    {
+        "key": "yolov8s-worldv2",
+        "name": "YOLOWorld",
+        "speed": "Medium",
+        "description": "Open-vocabulary YOLO — you define what to detect. Add deer, moose, elk, mountain lion, bobcat, etc. ~44 MB download on first use. Best balance of speed and North American wildlife detection.",
+        "open_vocab": True,
+        "requires_install": False,
+        "default_classes": DEFAULT_WILDLIFE_CLASSES,
+    },
+    {
+        "key": "megadetector",
+        "name": "MegaDetector v5",
+        "speed": "Medium",
+        "description": "Trained on millions of wildlife camera trap images by Microsoft. Detects any animal (deer, moose, elk, mountain lion, bobcat — anything) as 'animal'. Also detects people and vehicles. ~220 MB download. Best raw wildlife sensitivity; does not identify specific species.",
+        "open_vocab": False,
+        "requires_install": False,
+        "default_classes": None,
+    },
+    {
+        "key": "owlv2",
+        "name": "OWLv2",
+        "speed": "Very Slow",
+        "description": "Google's open-vocabulary vision transformer. Define any class by name — high accuracy on rare or unusual species. Very slow on CPU (10–30s/scan); only practical with periodic scanning enabled. Requires transformers library (~2 GB download).",
+        "open_vocab": True,
+        "requires_install": True,
+        "default_classes": DEFAULT_WILDLIFE_CLASSES,
+    },
+    {
+        "key": "grounding-dino",
+        "name": "Grounding DINO",
+        "speed": "Very Slow",
+        "description": "Powerful open-vocabulary detection — describe objects in natural language. Very slow on CPU. Useful for difficult or rare subjects. Requires transformers library.",
+        "open_vocab": True,
+        "requires_install": True,
+        "default_classes": DEFAULT_WILDLIFE_CLASSES,
+    },
+]
+
+_MODELS_BY_KEY = {m["key"]: m for m in MODELS}
+
+
+def _classify_open_vocab(label: str) -> str:
+    """Map a free-text class label to our category system."""
+    l = label.lower().strip()
+    if l in CATEGORIES:
+        return CATEGORIES[l]
+    if l in _PEOPLE_TERMS:
+        return 'people'
+    if l in _VEHICLE_TERMS:
+        return 'vehicles'
+    return 'animals'
+
+
+_DETECT_IMGSZ = 320  # must match the imgsz used in ObjectDetector.detect()
 
 def _resolve_model(model_name: str) -> str:
-    """Prefer yolov8n.onnx over yolov8n.pt when available — faster CPU inference."""
+    """Prefer .onnx over .pt when available, but only if its input shape matches _DETECT_IMGSZ."""
     if model_name.endswith('.pt'):
         onnx = model_name[:-3] + '.onnx'
         here = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), onnx)
         if os.path.exists(here):
-            return here
+            try:
+                import onnxruntime as ort
+                sess = ort.InferenceSession(here, providers=['CPUExecutionProvider'])
+                shape = sess.get_inputs()[0].shape  # [1, 3, H, W]
+                if shape[2] == _DETECT_IMGSZ and shape[3] == _DETECT_IMGSZ:
+                    return here
+            except Exception:
+                pass
     return model_name
+
+
+def _models_dir() -> str:
+    d = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
+    os.makedirs(d, exist_ok=True)
+    return d
+
 
 class ObjectDetector:
     def __init__(self, model_name: str = "yolov8n.pt", confidences: dict = None):
@@ -53,6 +162,11 @@ class ObjectDetector:
         default = cfg.detection_confidence
         self._confidences = {c: confidences.get(c, default) if confidences else default
                              for c in _CATEGORIES_LIST}
+        # Trigger PyTorch JIT warmup now so the first real inference isn't slow enough to timeout.
+        try:
+            self._model(np.zeros((320, 320, 3), dtype=np.uint8), verbose=False, imgsz=320)
+        except Exception:
+            pass
 
     def reload(self, model_name: str):
         self._model = YOLO(_resolve_model(model_name))
@@ -63,7 +177,7 @@ class ObjectDetector:
 
     def detect(self, frame: np.ndarray) -> List[Detection]:
         min_conf = min(self._confidences.values())
-        results = self._model(frame, verbose=False, conf=min_conf, imgsz=224)[0]
+        results = self._model(frame, verbose=False, conf=min_conf, imgsz=320)[0]
         detections = []
         for box in results.boxes:
             label = results.names[int(box.cls)]
@@ -74,3 +188,222 @@ class ObjectDetector:
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             detections.append(Detection(label=label, category=category, confidence=confidence, bbox=(x1, y1, x2, y2)))
         return detections
+
+
+class YOLOWorldDetector:
+    def __init__(self, classes: list = None, confidences: dict = None):
+        try:
+            from ultralytics import YOLOWorld as _YW
+        except ImportError:
+            raise ImportError("YOLOWorld requires ultralytics >= 8.0.43: pip install -U ultralytics")
+        self._model = _YW(_resolve_model('yolov8s-worldv2.pt'))
+        self._classes = list(classes) if classes else list(DEFAULT_WILDLIFE_CLASSES)
+        self._model.set_classes(self._classes)
+        default = cfg.detection_confidence
+        self._confidences = {c: confidences.get(c, default) if confidences else default
+                             for c in _CATEGORIES_LIST}
+
+    def set_category_confidence(self, category: str, value: float):
+        if category in self._confidences:
+            self._confidences[category] = value
+
+    def detect(self, frame: np.ndarray) -> List[Detection]:
+        min_conf = min(self._confidences.values())
+        results = self._model(frame, verbose=False, conf=min_conf, imgsz=320)[0]
+        detections = []
+        for box in results.boxes:
+            cls_idx = int(box.cls)
+            if cls_idx >= len(self._classes):
+                continue
+            label = self._classes[cls_idx]
+            confidence = float(box.conf)
+            category = _classify_open_vocab(label)
+            if confidence < self._confidences.get(category, min_conf):
+                continue
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            detections.append(Detection(label=label, category=category, confidence=confidence, bbox=(x1, y1, x2, y2)))
+        return detections
+
+
+class MegaDetectorDetector:
+    _MODEL_URL = "https://github.com/microsoft/CameraTraps/releases/download/v5.0/md_v5a.0.0.pt"
+    _MODEL_FILE = "md_v5a.0.0.pt"
+    _CATEGORY_MAP = {"animal": "animals", "person": "people", "vehicle": "vehicles"}
+
+    def __init__(self, confidences: dict = None):
+        path = self._ensure_model()
+        try:
+            import importlib, sys, yolov5
+            # backend/models/ shadows yolov5's models package in sys.path.
+            # Swap it for the duration of torch.load so pickle resolves classes correctly.
+            # Safe: all service code uses `from models.database import X` which is
+            # already cached in sys.modules['models.database'] and is unaffected.
+            _orig = sys.modules.get('models')
+            sys.modules['models'] = importlib.import_module('yolov5.models')
+            try:
+                self._model = yolov5.load(path, verbose=False)
+            finally:
+                if _orig is not None:
+                    sys.modules['models'] = _orig
+                else:
+                    sys.modules.pop('models', None)
+        except Exception as e:
+            raise RuntimeError(f"MegaDetector failed to load: {e}") from e
+        self._model.eval()
+        default = cfg.detection_confidence
+        self._confidences = {c: confidences.get(c, default) if confidences else default
+                             for c in _CATEGORIES_LIST}
+        try:
+            self._model(np.zeros((640, 640, 3), dtype=np.uint8), size=640)
+        except Exception:
+            pass
+
+    def _ensure_model(self) -> str:
+        import urllib.request
+        path = os.path.join(_models_dir(), self._MODEL_FILE)
+        if not os.path.exists(path):
+            urllib.request.urlretrieve(self._MODEL_URL, path)
+        return path
+
+    def set_category_confidence(self, category: str, value: float):
+        if category in self._confidences:
+            self._confidences[category] = value
+
+    def detect(self, frame: np.ndarray) -> List[Detection]:
+        min_conf = min(self._confidences.values())
+        self._model.conf = min_conf
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self._model(frame_rgb, size=640)
+        names = results.names
+        detections = []
+        for row in results.xyxy[0].tolist():
+            x1, y1, x2, y2, confidence, cls_idx = row
+            label = names[int(cls_idx)]
+            confidence = float(confidence)
+            category = self._CATEGORY_MAP.get(label, 'other')
+            if confidence < self._confidences.get(category, min_conf):
+                continue
+            detections.append(Detection(
+                label=label, category=category, confidence=confidence,
+                bbox=(int(x1), int(y1), int(x2), int(y2)),
+            ))
+        return detections
+
+
+class OWLv2Detector:
+    def __init__(self, classes: list = None, confidences: dict = None):
+        try:
+            from transformers import Owlv2Processor, Owlv2ForObjectDetection
+        except ImportError:
+            raise ImportError("OWLv2 requires transformers: pip install transformers torch Pillow")
+        import torch
+        self._processor = Owlv2Processor.from_pretrained("google/owlv2-base-patch16")
+        self._owlmodel = Owlv2ForObjectDetection.from_pretrained("google/owlv2-base-patch16")
+        self._owlmodel.eval()
+        self._classes = list(classes) if classes else list(DEFAULT_WILDLIFE_CLASSES)
+        self._texts = [[f"a {c}" for c in self._classes]]
+        default = cfg.detection_confidence
+        self._confidences = {c: confidences.get(c, default) if confidences else default
+                             for c in _CATEGORIES_LIST}
+
+    def set_category_confidence(self, category: str, value: float):
+        if category in self._confidences:
+            self._confidences[category] = value
+
+    def detect(self, frame: np.ndarray) -> List[Detection]:
+        from PIL import Image
+        import torch
+        h, w = frame.shape[:2]
+        image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        min_conf = min(self._confidences.values())
+        inputs = self._processor(text=self._texts, images=image, return_tensors="pt")
+        with torch.no_grad():
+            outputs = self._owlmodel(**inputs)
+        target_sizes = torch.Tensor([[h, w]])
+        results = self._processor.post_process_object_detection(
+            outputs=outputs, threshold=min_conf, target_sizes=target_sizes
+        )[0]
+        detections = []
+        for box, score, label_idx in zip(
+            results["boxes"].tolist(),
+            results["scores"].tolist(),
+            results["labels"].tolist(),
+        ):
+            if label_idx >= len(self._classes):
+                continue
+            label = self._classes[label_idx]
+            confidence = float(score)
+            category = _classify_open_vocab(label)
+            if confidence < self._confidences.get(category, min_conf):
+                continue
+            x1, y1, x2, y2 = map(int, box)
+            detections.append(Detection(label=label, category=category, confidence=confidence, bbox=(x1, y1, x2, y2)))
+        return detections
+
+
+class GroundingDINODetector:
+    def __init__(self, classes: list = None, confidences: dict = None):
+        try:
+            from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
+        except ImportError:
+            raise ImportError("Grounding DINO requires transformers: pip install transformers torch Pillow")
+        self._processor = AutoProcessor.from_pretrained("IDEA-Research/grounding-dino-tiny")
+        self._dinomodel = AutoModelForZeroShotObjectDetection.from_pretrained("IDEA-Research/grounding-dino-tiny")
+        self._dinomodel.eval()
+        self._classes = list(classes) if classes else list(DEFAULT_WILDLIFE_CLASSES)
+        self._text = ". ".join(self._classes) + "."
+        default = cfg.detection_confidence
+        self._confidences = {c: confidences.get(c, default) if confidences else default
+                             for c in _CATEGORIES_LIST}
+
+    def set_category_confidence(self, category: str, value: float):
+        if category in self._confidences:
+            self._confidences[category] = value
+
+    def detect(self, frame: np.ndarray) -> List[Detection]:
+        from PIL import Image
+        import torch
+        h, w = frame.shape[:2]
+        image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        min_conf = min(self._confidences.values())
+        inputs = self._processor(images=image, text=self._text, return_tensors="pt")
+        with torch.no_grad():
+            outputs = self._dinomodel(**inputs)
+        results = self._processor.post_process_grounded_object_detection(
+            outputs,
+            inputs.input_ids,
+            threshold=min_conf,
+            text_threshold=0.25,
+            target_sizes=[(h, w)],
+        )[0]
+        detections = []
+        for box, score, label in zip(
+            results["boxes"].tolist(),
+            results["scores"].tolist(),
+            results["labels"],
+        ):
+            label_str = label.strip().lower()
+            confidence = float(score)
+            category = _classify_open_vocab(label_str)
+            if confidence < self._confidences.get(category, min_conf):
+                continue
+            x1, y1, x2, y2 = map(int, box)
+            detections.append(Detection(label=label_str, category=category, confidence=confidence, bbox=(x1, y1, x2, y2)))
+        return detections
+
+
+def create_detector(model_key: str, classes: list = None, confidences: dict = None):
+    """Factory — returns the right detector for the given model key."""
+    key = model_key.removesuffix('.pt') if model_key.endswith('.pt') else model_key
+    if key in ('yolov8n', 'yolov8s', 'yolov8m'):
+        return ObjectDetector(f'{key}.pt', confidences=confidences)
+    if key == 'yolov8s-worldv2':
+        return YOLOWorldDetector(classes=classes, confidences=confidences)
+    if key == 'megadetector':
+        return MegaDetectorDetector(confidences=confidences)
+    if key == 'owlv2':
+        return OWLv2Detector(classes=classes, confidences=confidences)
+    if key == 'grounding-dino':
+        return GroundingDINODetector(classes=classes, confidences=confidences)
+    # Fallback: treat as a raw filename
+    return ObjectDetector(model_key if '.' in model_key else f'{model_key}.pt', confidences=confidences)

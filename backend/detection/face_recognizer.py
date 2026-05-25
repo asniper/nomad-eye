@@ -16,7 +16,7 @@ except ImportError:
 
 _MATCH_THRESHOLD_FR   = 0.55   # L2 distance: lower = stricter (face_recognition lib)
 _MATCH_THRESHOLD_HIST = 0.82   # cosine similarity: higher = stricter (OpenCV fallback)
-_MIN_FACE_PX = 40              # minimum face size in the DOWNSAMPLED image (≈80px at native 640px)
+_MIN_FACE_PX = 20              # minimum face size in the detection image
 _DETECTION_MAX_DIM = 320       # downsample to this max dim before HOG detection
 
 # Auto-sample building for known faces
@@ -77,14 +77,14 @@ class FaceRecognizer:
     # ------------------------------------------------------------------
     # Public: detect + recognize faces, returns Detection-compatible list
     # ------------------------------------------------------------------
-    def detect_and_recognize(self, frame: np.ndarray) -> list:
+    def detect_and_recognize(self, frame: np.ndarray, max_dim: int = _DETECTION_MAX_DIM) -> list:
         """Returns list of Detection(label, category='faces', confidence, bbox)."""
         if not _face_sem.acquire(timeout=2.0):
             return []  # other camera held the lock for too long; skip this frame
 
         try:
             h, w = frame.shape[:2]
-            scale = min(1.0, _DETECTION_MAX_DIM / max(h, w, 1))
+            scale = min(1.0, max_dim / max(h, w, 1))
             if scale < 1.0:
                 small = cv2.resize(frame, (int(w * scale), int(h * scale)))
             else:
@@ -109,6 +109,44 @@ class FaceRecognizer:
             return results
         finally:
             _face_sem.release()
+
+    def detect_in_crops(self, frame: np.ndarray, person_bboxes: list) -> list:
+        """Targeted face detection within YOLO person bboxes.
+        Crops each person to its head region and upscales before detection so
+        small faces that are invisible in the full-frame downscale are caught."""
+        if not person_bboxes:
+            return []
+        results = []
+        h_f, w_f = frame.shape[:2]
+        from detection.detector import Detection
+        for (px1, py1, px2, py2) in person_bboxes:
+            pad_x = max(10, int((px2 - px1) * 0.1))
+            head_h = int((py2 - py1) * 0.5)
+            cx1 = max(0, px1 - pad_x)
+            cy1 = max(0, py1)
+            cx2 = min(w_f, px2 + pad_x)
+            cy2 = min(h_f, py1 + head_h)
+            if cx2 - cx1 < 30 or cy2 - cy1 < 20:
+                continue
+            crop = frame[cy1:cy2, cx1:cx2]
+            ch, cw = crop.shape[:2]
+            # Scale up so the face has more pixels to work with
+            scale = min(6.0, _DETECTION_MAX_DIM / max(ch, cw, 1))
+            if scale > 1.01:
+                scaled = cv2.resize(crop, (int(cw * scale), int(ch * scale)))
+            else:
+                scaled = crop
+                scale = 1.0
+            local = self.detect_and_recognize(scaled)
+            inv = 1.0 / scale
+            for d in local:
+                lx1, ly1, lx2, ly2 = d.bbox
+                results.append(Detection(
+                    label=d.label, category='faces', confidence=d.confidence,
+                    bbox=(int(cx1 + lx1 * inv), int(cy1 + ly1 * inv),
+                          int(cx1 + lx2 * inv), int(cy1 + ly2 * inv))
+                ))
+        return results
 
     # ------------------------------------------------------------------
     # face_recognition (dlib) path
@@ -156,7 +194,7 @@ class FaceRecognizer:
         from detection.detector import Detection
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = self._cascade.detectMultiScale(
-            gray, scaleFactor=1.2, minNeighbors=8,
+            gray, scaleFactor=1.1, minNeighbors=5,
             minSize=(_MIN_FACE_PX, _MIN_FACE_PX))
         if not isinstance(faces, np.ndarray) or len(faces) == 0:
             return []

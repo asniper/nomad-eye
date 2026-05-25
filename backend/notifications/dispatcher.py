@@ -121,9 +121,18 @@ async def dispatch_notification(camera_id: int, detections: list, image_path: st
             if not matching:
                 continue
 
-            labels = ", ".join(sorted(set(
-                f"{d.label} ({round(d.confidence * 100)}%)" for d in matching
-            )))
+            _PRIORITY = {"people": 0, "faces": 1, "vehicles": 2, "animals": 3, "other": 4}
+
+            def _fmt_detection(d):
+                pct = round(d.confidence * 100)
+                if d.category == 'faces':
+                    return f"Face ({d.label} {pct}%)"
+                return f"{d.label} ({pct}%)"
+
+            unique = {_fmt_detection(d): d for d in matching}
+            labels = ", ".join(
+                t for t, d in sorted(unique.items(), key=lambda x: _PRIORITY.get(x[1].category, 4))
+            )
             lines = ["Nomad Eye Alert", f"{camera_name} · {time_str}", f"Detected: {labels}"]
             if event_link:
                 lines.append(f"View: {event_link}")

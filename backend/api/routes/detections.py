@@ -191,6 +191,31 @@ def purge_detections(body: PurgeBody, db: sqlite3.Connection = Depends(get_db), 
     return {"deleted_records": deleted_records, "deleted_images": deleted_images}
 
 
+@router.delete("/events/{event_id}")
+def delete_event(event_id: str, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+    targeted = db.execute(
+        "SELECT DISTINCT image_path FROM detections WHERE event_id = ? AND image_path IS NOT NULL",
+        (event_id,)
+    ).fetchall()
+    targeted_paths = {r["image_path"] for r in targeted}
+
+    db.execute("DELETE FROM detections WHERE event_id = ?", (event_id,))
+    db.commit()
+
+    still_referenced = {
+        r["image_path"]
+        for r in db.execute("SELECT DISTINCT image_path FROM detections WHERE image_path IS NOT NULL").fetchall()
+    }
+    for path in targeted_paths:
+        if path not in still_referenced:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    return {"deleted": event_id}
+
+
 @router.get("/{detection_id}/image")
 def get_image(detection_id: int, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
     row = db.execute("SELECT image_path FROM detections WHERE id = ?", (detection_id,)).fetchone()

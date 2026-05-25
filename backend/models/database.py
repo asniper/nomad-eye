@@ -147,12 +147,36 @@ def init_db():
         "ALTER TABLE notification_rules ADD COLUMN last_notified_at TEXT",
         "ALTER TABLE notification_queue ADD COLUMN events_json TEXT",
         "ALTER TABLE cameras ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE cameras ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1",
     ]:
         try:
             db.execute(migration)
             db.commit()
         except sqlite3.OperationalError:
             pass
+    # Seed default config values for fresh installs. INSERT OR IGNORE leaves existing values untouched.
+    defaults = [
+        ('confidence_people',        '0.80'),
+        ('confidence_vehicles',      '0.80'),
+        ('confidence_animals',       '0.80'),
+        ('confidence_other',         '0.80'),
+        ('confidence_faces',         '0.80'),
+        ('motion_threshold',         '100'),
+        ('category_enabled_people',  '1'),
+        ('category_enabled_vehicles','1'),
+        ('category_enabled_animals', '1'),
+        ('category_enabled_other',   '1'),
+        ('category_enabled_faces',   '0'),
+        ('update_channel',           'releases'),
+        ('auto_update_enabled',      '0'),
+    ]
+    for key, value in defaults:
+        db.execute(
+            "INSERT OR IGNORE INTO app_config (key, value) VALUES (?, ?)",
+            (key, value)
+        )
+    db.commit()
+
     # Migrate camera names from app_config into cameras.name (one-time, safe to re-run)
     try:
         db.execute("""
