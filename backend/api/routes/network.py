@@ -98,6 +98,12 @@ def add_network(body: AddNetworkRequest, _=Depends(require_auth)):
 
 @router.get("/scan")
 def scan(_=Depends(require_auth)):
+    # Trigger a fresh scan; ignore errors (e.g. already scanning, rate-limited)
+    try:
+        nmcli("dev", "wifi", "rescan")
+        import time; time.sleep(3)
+    except Exception:
+        pass
     raw = nmcli("--terse", "--fields", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list")
     known_ssids = {n["ssid"] for n in get_known_networks()}
     seen = set()
