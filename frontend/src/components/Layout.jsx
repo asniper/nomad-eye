@@ -3,7 +3,6 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useDeviceStatus } from '../context/DeviceStatusContext'
 import { getTimezone } from '../utils/dates'
-import logoUrl from '../assets/logo-shadow.png'
 import logoNarrowUrl from '../assets/logo-narrow.png'
 
 function NavClock() {
@@ -67,15 +66,17 @@ export default function Layout({ children }) {
         style={{ background: 'linear-gradient(to bottom, #4c6e5d, #151925)', width: '262px' }}
       >
         <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-          <img src={logoUrl} alt="Nomad Eye" className="w-full h-auto" style={{ maxWidth: '230px' }} />
-          <button
-            onClick={() => setMenuOpen(false)}
-            className="md:hidden text-white/60 hover:text-white p-1 shrink-0"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <img src={logoNarrowUrl} alt="Nomad Eye" className="h-auto w-auto" />
+          {menuOpen && (
+            <button
+              onClick={() => setMenuOpen(false)}
+              className="md:hidden text-white/60 hover:text-white p-1 shrink-0"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
         </div>
 
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
@@ -149,7 +150,7 @@ export default function Layout({ children }) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <img src={logoNarrowUrl} alt="Nomad Eye" className="h-7 w-auto" />
+          <img src={logoNarrowUrl} alt="Nomad Eye" className="max-h-20 w-auto" />
         </div>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>

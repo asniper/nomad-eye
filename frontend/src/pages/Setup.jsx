@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import axios from 'axios'
-import logoUrl from '../assets/logo-shadow.png'
+import logoUrl from '../assets/logo-narrow.png'
 
 const api = axios.create({ baseURL: '/api/setup' })
 
@@ -128,7 +128,7 @@ export default function Setup() {
 
         {/* Header */}
         <div className="text-center mb-8">
-          <img src={logoUrl} alt="Nomad Eye" className="mx-auto mb-3" style={{ width: '230px', maxWidth: '100%' }} />
+          <img src={logoUrl} alt="Nomad Eye" className="h-auto w-auto mx-auto mb-3" />
           <p className="text-gray-400 text-sm">Connect your device to WiFi</p>
         </div>
 

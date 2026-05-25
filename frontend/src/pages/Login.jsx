@@ -23,7 +23,7 @@ export default function Login() {
     <div className="min-h-screen bg-[#1A1A1A] flex items-center justify-center">
       <div className="bg-[#2E2E2E] p-8 rounded-xl w-full max-w-sm shadow-2xl border border-[#3A3A3A]">
         <div className="mb-6">
-          <img src={logoUrl} alt="Nomad Eye" className="w-full h-auto" />
+          <img src={logoUrl} alt="Nomad Eye" className="h-auto w-auto mx-auto block" />
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <input
