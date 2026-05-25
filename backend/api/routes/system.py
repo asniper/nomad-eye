@@ -1,10 +1,9 @@
-import json
 import os
+import secrets
 import sqlite3
 import subprocess
 import threading
 import time
-import urllib.request
 import psutil
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from api.routes.auth import require_auth
@@ -65,30 +64,32 @@ def _current_version():
     return tag or sha, sha, last_updated
 
 
-def _github_get(path: str) -> dict:
-    url = f'https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}{path}'
-    req = urllib.request.Request(url, headers={
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': f'nomad-eye',
-    })
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read())
-
-
 def _fetch_latest_release():
+    """Get latest release tag via git ls-remote — works for private repos."""
     try:
-        data = _github_get('/releases/latest')
-        return data.get('tag_name'), data.get('published_at')
+        out = subprocess.check_output(
+            ['git', '-C', PROJECT_PATH, 'ls-remote', '--tags', '--sort=v:refname', 'origin'],
+            stderr=subprocess.DEVNULL, text=True, timeout=15,
+        )
+        tags = []
+        for line in out.splitlines():
+            parts = line.split('\t')
+            if len(parts) == 2 and parts[1].startswith('refs/tags/') and not parts[1].endswith('^{}'):
+                tags.append(parts[1][len('refs/tags/'):])
+        return (tags[-1], None) if tags else (None, None)
     except Exception:
         return None, None
 
 
 def _fetch_latest_main():
+    """Get latest commit SHA on main via git ls-remote."""
     try:
-        data = _github_get('/commits/main')
-        sha = data.get('sha', '')[:7]
-        date = data.get('commit', {}).get('committer', {}).get('date')
-        return sha, date
+        out = subprocess.check_output(
+            ['git', '-C', PROJECT_PATH, 'ls-remote', 'origin', 'main'],
+            stderr=subprocess.DEVNULL, text=True, timeout=15,
+        )
+        sha = out.split()[0][:7] if out.strip() else None
+        return sha, None
     except Exception:
         return None, None
 
@@ -244,6 +245,19 @@ def trigger_update(background_tasks: BackgroundTasks, _=Depends(require_auth)):
     channel = _db_get('update_channel', 'releases')
     background_tasks.add_task(perform_update, channel)
     return {"updating": True, "channel": channel}
+
+
+@router.post("/change-password")
+def change_password(body: dict, _=Depends(require_auth)):
+    current = body.get('current_password', '')
+    new_pw = body.get('new_password', '')
+    if not new_pw or len(new_pw) < 4:
+        raise HTTPException(status_code=400, detail='New password must be at least 4 characters')
+    from api.routes.auth import _get_admin_password
+    if not secrets.compare_digest(current, _get_admin_password()):
+        raise HTTPException(status_code=401, detail='Current password is incorrect')
+    _db_set('admin_password', new_pw)
+    return {"changed": True}
 
 
 @router.post("/update-settings")

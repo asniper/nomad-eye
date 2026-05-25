@@ -80,6 +80,7 @@ export const system = {
   updateStatus: () => api.get('/system/update-status'),
   update: () => api.post('/system/update'),
   saveUpdateSettings: (data) => api.post('/system/update-settings', data),
+  changePassword: (current_password, new_password) => api.post('/system/change-password', { current_password, new_password }),
 }
 
 export const faces = {
