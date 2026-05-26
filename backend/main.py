@@ -138,6 +138,11 @@ app.include_router(storage.router, prefix="/api/storage", tags=["storage"])
 app.include_router(system.router, prefix="/api/system", tags=["system"])
 app.include_router(faces.router, prefix="/api/faces", tags=["faces"])
 
+@app.get("/api/health")
+def health():
+    return {"ok": True}
+
+
 STATIC_DIR = Path(__file__).parent / "static"
 
 if STATIC_DIR.exists():

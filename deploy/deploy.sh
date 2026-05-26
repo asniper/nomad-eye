@@ -8,7 +8,7 @@ sudo apt update && sudo apt upgrade -y
 
 # Install system dependencies
 sudo apt install -y python3 python3-pip python3-venv nodejs npm git \
-    libopencv-dev python3-opencv network-manager curl
+    libopencv-dev python3-opencv network-manager curl nginx
 
 # Clone or pull repo
 REPO_DIR="/opt/nomad-eye"
@@ -52,6 +52,12 @@ sudo cp $REPO_DIR/deploy/nomad-eye-network.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable nomad-eye-backend nomad-eye-network
 sudo systemctl restart nomad-eye-backend nomad-eye-network
+
+# Configure nginx as reverse proxy
+sudo cp $REPO_DIR/deploy/nginx.conf /etc/nginx/sites-available/nomad-eye
+sudo ln -sf /etc/nginx/sites-available/nomad-eye /etc/nginx/sites-enabled/nomad-eye
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl enable nginx && sudo systemctl restart nginx
 
 echo ""
 echo "=== Deployment complete ==="
