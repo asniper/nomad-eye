@@ -93,7 +93,10 @@ class CameraCapture:
                 continue
 
             if self._cap and self._cap.isOpened():
-                ret, frame = self._cap.read()
+                try:
+                    ret, frame = self._cap.read()
+                except Exception:
+                    ret, frame = False, None
                 if ret:
                     consecutive_failures = 0
                     now = time.time()
