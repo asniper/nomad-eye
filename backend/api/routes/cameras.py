@@ -150,9 +150,6 @@ async def scan_and_refresh(db: sqlite3.Connection = None) -> list:
     if _pipeline is None:
         return []
 
-    existing_paths, _ = _pipeline.prune_dead_and_get_state()
-    existing_cam_ids = {c.camera_id for c in _pipeline._cameras}
-
     owned_db = db is None
     if owned_db:
         cfg = get_settings()
@@ -167,6 +164,26 @@ async def scan_and_refresh(db: sqlite3.Connection = None) -> list:
     pending = []
 
     try:
+        # Auto-recover cameras that died but are still physically connected and enabled.
+        # Must run before prune_dead_and_get_state so reload_camera can find them in the pipeline.
+        with _pipeline._lock:
+            dead_in_pipeline = [
+                (c.camera_id, c.device_path)
+                for c in _pipeline._cameras
+                if not c.is_alive()
+            ]
+        for cam_id, device_path in dead_in_pipeline:
+            if not os.path.exists(device_path):
+                continue
+            row = _db.execute(
+                "SELECT enabled FROM cameras WHERE camera_id=? AND deleted=0", (cam_id,)
+            ).fetchone()
+            if row and row['enabled']:
+                await loop.run_in_executor(None, _pipeline.reload_camera, cam_id)
+
+        existing_paths, _ = _pipeline.prune_dead_and_get_state()
+        existing_cam_ids = {c.camera_id for c in _pipeline._cameras}
+
         for path in sorted(glob.glob("/dev/video*")):
             if path in existing_paths:
                 continue

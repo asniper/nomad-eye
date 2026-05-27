@@ -283,6 +283,9 @@ class DetectionPipeline:
                 return False
             device_idx = cam.device_index
             overlay = self._overlay_enabled.get(camera_id, True)
+            hw_adj = dict(cam._hw_adjustments)
+            sw_br = cam._sw_brightness
+            sw_ct = cam._sw_contrast
             cam.stop()
             self._cameras.remove(cam)
             self._detectors.pop(camera_id, None)
@@ -299,7 +302,8 @@ class DetectionPipeline:
         time.sleep(1.0)  # Give OS time to release the device
 
         w, h, fps = self._camera_quality()
-        new_cap = CameraCapture(camera_id=camera_id, device_index=device_idx, width=w, height=h, fps=fps)
+        new_cap = CameraCapture(camera_id=camera_id, device_index=device_idx, width=w, height=h, fps=fps,
+                                hw_adjustments=hw_adj, sw_brightness=sw_br, sw_contrast=sw_ct)
         new_cap.start()
         time.sleep(0.5)
 
