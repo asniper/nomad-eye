@@ -1,9 +1,10 @@
 import asyncio
 import glob
+import json
 import os
 import sqlite3
 import cv2
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from api.routes.auth import require_auth
@@ -25,6 +26,12 @@ def set_pipeline(pipeline):
 
 class CameraNameBody(BaseModel):
     name: str
+
+
+class AdjustmentsBody(BaseModel):
+    hw: dict = {}
+    sw_brightness: int = 0
+    sw_contrast: float = 1.0
 
 
 def _get_usb_id(video_path: str) -> str:
@@ -183,8 +190,16 @@ async def scan_and_refresh(db: sqlite3.Connection = None) -> list:
                 await asyncio.sleep(0.3)
                 dev_idx = int(path.replace("/dev/video", ""))
                 w, h, fps = _pipeline._camera_quality()
+                adj_row = _db.execute(
+                    "SELECT hw_adjustments, sw_brightness, sw_contrast FROM cameras WHERE camera_id=?",
+                    (cam_id,)
+                ).fetchone()
+                hw_adj = json.loads(adj_row['hw_adjustments'] or '{}') if adj_row else {}
+                sw_br = (adj_row['sw_brightness'] or 0) if adj_row else 0
+                sw_ct = (adj_row['sw_contrast'] or 1.0) if adj_row else 1.0
                 cap = CameraCapture(camera_id=cam_id, device_index=dev_idx, usb_id=usb_id,
-                                    width=w, height=h, fps=fps)
+                                    width=w, height=h, fps=fps,
+                                    hw_adjustments=hw_adj, sw_brightness=sw_br, sw_contrast=sw_ct)
                 cap.start()
                 pending.append((cap, cam_id, was_deleted))
                 existing_cam_ids.add(cam_id)
@@ -344,6 +359,54 @@ def toggle_overlay(camera_id: int, enabled: bool, _=Depends(require_auth)):
     if _pipeline:
         _pipeline.set_overlay(camera_id, enabled)
     return {"camera_id": camera_id, "overlay": enabled}
+
+
+@router.get("/{camera_id}/controls")
+def get_camera_controls(
+    camera_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    _=Depends(require_auth),
+):
+    row = db.execute(
+        "SELECT hw_adjustments, sw_brightness, sw_contrast FROM cameras WHERE camera_id=? AND deleted=0",
+        (camera_id,)
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    hw_adjustments = json.loads(row['hw_adjustments'] or '{}')
+    sw_brightness = row['sw_brightness'] if row['sw_brightness'] is not None else 0
+    sw_contrast = row['sw_contrast'] if row['sw_contrast'] is not None else 1.0
+    hw_controls = {}
+    if _pipeline:
+        cam = next((c for c in _pipeline._cameras if c.camera_id == camera_id), None)
+        if cam:
+            from camera.v4l2 import get_controls
+            hw_controls = get_controls(cam.device_path)
+    return {
+        "hw_controls": hw_controls,
+        "hw_adjustments": hw_adjustments,
+        "sw_brightness": sw_brightness,
+        "sw_contrast": sw_contrast,
+    }
+
+
+@router.patch("/{camera_id}/adjustments")
+def set_camera_adjustments(
+    camera_id: int,
+    body: AdjustmentsBody,
+    db: sqlite3.Connection = Depends(get_db),
+    _=Depends(require_auth),
+):
+    db.execute(
+        "UPDATE cameras SET hw_adjustments=?, sw_brightness=?, sw_contrast=? WHERE camera_id=?",
+        (json.dumps(body.hw), int(body.sw_brightness), float(body.sw_contrast), camera_id)
+    )
+    db.commit()
+    if _pipeline:
+        cam = next((c for c in _pipeline._cameras if c.camera_id == camera_id), None)
+        if cam:
+            cam.set_adjustments(hw=body.hw, sw_brightness=int(body.sw_brightness), sw_contrast=float(body.sw_contrast))
+    return {"ok": True}
 
 
 @router.websocket("/{camera_id}/stream")

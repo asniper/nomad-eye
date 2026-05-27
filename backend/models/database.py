@@ -148,6 +148,9 @@ def init_db():
         "ALTER TABLE notification_queue ADD COLUMN events_json TEXT",
         "ALTER TABLE cameras ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE cameras ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE cameras ADD COLUMN hw_adjustments TEXT NOT NULL DEFAULT '{}'",
+        "ALTER TABLE cameras ADD COLUMN sw_brightness INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE cameras ADD COLUMN sw_contrast REAL NOT NULL DEFAULT 1.0",
     ]:
         try:
             db.execute(migration)

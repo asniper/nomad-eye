@@ -12,7 +12,8 @@ class Frame:
 
 class CameraCapture:
     def __init__(self, camera_id: int, device_index: int, usb_id: str = '',
-                 width: int = 1280, height: int = 720, fps: int = 15):
+                 width: int = 1280, height: int = 720, fps: int = 15,
+                 hw_adjustments: dict = None, sw_brightness: int = 0, sw_contrast: float = 1.0):
         self.camera_id = camera_id
         self.device_index = device_index
         self.device_path = f"/dev/video{device_index}"
@@ -20,6 +21,9 @@ class CameraCapture:
         self._width = width
         self._height = height
         self._fps = fps
+        self._hw_adjustments: dict = hw_adjustments or {}
+        self._sw_brightness: int = sw_brightness
+        self._sw_contrast: float = sw_contrast
         self._cap: Optional[cv2.VideoCapture] = None
         self._frame: Optional[Frame] = None
         self._lock = threading.Lock()
@@ -38,6 +42,9 @@ class CameraCapture:
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
         self._cap.set(cv2.CAP_PROP_FPS, self._fps)
+        if self._hw_adjustments:
+            from camera.v4l2 import apply_controls
+            apply_controls(self.device_path, self._hw_adjustments)
         self._running = True
         self._thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._thread.start()
@@ -71,6 +78,17 @@ class CameraCapture:
     def set_fps(self, fps: int):
         self._fps = max(1, fps)
 
+    def set_adjustments(self, hw: dict = None, sw_brightness: int = None, sw_contrast: float = None):
+        if hw is not None:
+            self._hw_adjustments = hw
+            if self._cap and self._cap.isOpened():
+                from camera.v4l2 import apply_controls
+                apply_controls(self.device_path, hw)
+        if sw_brightness is not None:
+            self._sw_brightness = sw_brightness
+        if sw_contrast is not None:
+            self._sw_contrast = sw_contrast
+
     def _reopen_without_mjpeg(self):
         """Reopen capture without forcing MJPEG — fallback for cameras that don't support it."""
         if self._cap:
@@ -79,6 +97,9 @@ class CameraCapture:
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
         self._cap.set(cv2.CAP_PROP_FPS, self._fps)
+        if self._hw_adjustments:
+            from camera.v4l2 import apply_controls
+            apply_controls(self.device_path, self._hw_adjustments)
 
     def _capture_loop(self):
         consecutive_failures = 0
@@ -98,6 +119,8 @@ class CameraCapture:
                 except Exception:
                     ret, frame = False, None
                 if ret:
+                    if self._sw_brightness != 0 or self._sw_contrast != 1.0:
+                        frame = cv2.convertScaleAbs(frame, alpha=self._sw_contrast, beta=self._sw_brightness)
                     consecutive_failures = 0
                     now = time.time()
                     _next_capture = now + 1.0 / max(self._fps, 1)

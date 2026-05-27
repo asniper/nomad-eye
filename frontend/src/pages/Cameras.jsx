@@ -39,6 +39,161 @@ const MODEL_NAMES = {
   'grounding-dino': 'Grounding DINO',
 }
 
+function AdjustSlider({ label, min, max, step, value, onChange, format }) {
+  const display = format ? format(value) : value
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs">
+        <span className="text-gray-400">{label}</span>
+        <span className="text-gray-300 font-mono">{display}</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={e => onChange(step < 1 ? parseFloat(e.target.value) : parseInt(e.target.value, 10))}
+        className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-[#FFB800]"
+        style={{ accentColor: '#FFB800' }}
+      />
+    </div>
+  )
+}
+
+const HW_LABELS = {
+  brightness: 'Brightness',
+  contrast: 'Contrast',
+  saturation: 'Saturation',
+  hue: 'Hue',
+  sharpness: 'Sharpness',
+  gain: 'Gain',
+  exposure_time_absolute: 'Exposure',
+  white_balance_temperature: 'White Balance',
+  zoom_absolute: 'Zoom',
+  focus_absolute: 'Focus',
+}
+
+function AdjustPanel({ camId }) {
+  const [loading, setLoading] = useState(true)
+  const [hwControls, setHwControls] = useState({})
+  const [hwValues, setHwValues] = useState({})
+  const [swBrightness, setSwBrightness] = useState(0)
+  const [swContrast, setSwContrast] = useState(1.0)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    cameras.getControls(camId)
+      .then(r => {
+        const { hw_controls, hw_adjustments, sw_brightness, sw_contrast } = r.data
+        setHwControls(hw_controls)
+        const init = {}
+        for (const [name, ctrl] of Object.entries(hw_controls)) {
+          init[name] = hw_adjustments[name] ?? ctrl.value
+        }
+        setHwValues(init)
+        setSwBrightness(sw_brightness ?? 0)
+        setSwContrast(sw_contrast ?? 1.0)
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [camId])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await cameras.setAdjustments(camId, { hw: hwValues, sw_brightness: swBrightness, sw_contrast: swContrast })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch {}
+    setSaving(false)
+  }
+
+  const handleReset = () => {
+    const resetHw = {}
+    for (const [name, ctrl] of Object.entries(hwControls)) {
+      resetHw[name] = ctrl.default
+    }
+    setHwValues(resetHw)
+    setSwBrightness(0)
+    setSwContrast(1.0)
+  }
+
+  const intControls = Object.entries(hwControls).filter(([, c]) => c.type === 'int' || c.type === 'int64')
+
+  if (loading) {
+    return (
+      <div className="rounded-lg bg-[#1A1A1A] border border-[#3A3A3A] px-3 py-3 text-xs text-gray-600">
+        Loading controls...
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg bg-[#1A1A1A] border border-[#3A3A3A] px-4 py-3 space-y-4">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-gray-500 uppercase tracking-wider">Adjustments</span>
+        <div className="flex items-center gap-3">
+          <button onClick={handleReset} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+            Reset defaults
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-3 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50"
+            style={{ background: saved ? '#22C55E' : '#FFB800', color: saved ? '#fff' : '#151925' }}
+          >
+            {saving ? 'Saving...' : saved ? 'Saved ✓' : 'Save'}
+          </button>
+        </div>
+      </div>
+
+      {intControls.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-gray-600 mb-2">Hardware</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+            {intControls.map(([name, ctrl]) => (
+              <AdjustSlider
+                key={name}
+                label={HW_LABELS[name] || name.replace(/_/g, ' ')}
+                min={ctrl.min}
+                max={ctrl.max}
+                step={ctrl.step}
+                value={hwValues[name] ?? ctrl.value}
+                onChange={v => setHwValues(prev => ({ ...prev, [name]: v }))}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <div className="text-xs font-medium text-gray-600 mb-2">Software</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+          <AdjustSlider
+            label="Brightness"
+            min={-100}
+            max={100}
+            step={1}
+            value={swBrightness}
+            onChange={setSwBrightness}
+          />
+          <AdjustSlider
+            label="Contrast"
+            min={0.5}
+            max={3.0}
+            step={0.05}
+            value={swContrast}
+            onChange={setSwContrast}
+            format={v => v.toFixed(2)}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function DebugPanel({ info }) {
   if (!info || Object.keys(info).length === 0) {
     return (
@@ -189,6 +344,7 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
   const [resetting, setResetting] = useState(false)
   const [resetDone, setResetDone] = useState(false)
   const [showDetections, setShowDetections] = useState(false)
+  const [showAdjust, setShowAdjust] = useState(false)
   const [debugMode, setDebugMode] = useState(false)
   const [debugInfo, setDebugInfo] = useState(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -395,6 +551,14 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
           >
             Debug
           </button>
+          <button
+            onClick={() => setShowAdjust(p => !p)}
+            className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+            style={showAdjust ? { background: '#4c6e5d', color: '#ffffff' } : { background: '#3A3A3A', color: '#9CA3AF' }}
+            title="Camera adjustments"
+          >
+            Adjust
+          </button>
         </div>
       </div>
 
@@ -448,6 +612,10 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
 
       {debugMode && (
         <DebugPanel info={debugInfo} />
+      )}
+
+      {showAdjust && (
+        <AdjustPanel camId={cam.id} />
       )}
 
       <button

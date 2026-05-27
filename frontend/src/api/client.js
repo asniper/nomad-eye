@@ -22,6 +22,8 @@ export const cameras = {
   reload: (id) => api.post(`/cameras/${id}/reload`),
   resetTracking: (id) => api.post(`/cameras/${id}/reset-tracking`),
   setEnabled: (id, enabled) => api.post(`/cameras/${id}/enabled?enabled=${enabled}`),
+  getControls: (id) => api.get(`/cameras/${id}/controls`),
+  setAdjustments: (id, data) => api.patch(`/cameras/${id}/adjustments`, data),
 }
 
 export const detections = {
