@@ -85,15 +85,15 @@ def _match_detection(detection, active_events, frame_shape):
     return best
 
 class DetectionPipeline:
-    def __init__(self, cameras: list[CameraCapture], model_name: str = "yolov8n.pt", confidences: dict = None):
+    def __init__(self, cameras: list[CameraCapture], model_name: str = "yolov8n.pt", confidences: dict = None, classes: list = None):
         self._cameras = list(cameras)
         self._motion_threshold: int = cfg.motion_threshold
         self._detectors = {cam.camera_id: MotionDetector(threshold=self._motion_threshold) for cam in cameras}
         _model_key = model_name.removesuffix('.pt') if model_name.endswith('.pt') else model_name
         self._detection_model_key: str = _model_key
-        self._detection_classes: list = None
+        self._detection_classes: list = classes
         try:
-            self._object_detector = create_detector(_model_key, confidences=confidences)
+            self._object_detector = create_detector(_model_key, classes=classes, confidences=confidences)
         except Exception:
             _model_key = 'yolov8n'
             self._detection_model_key = _model_key
@@ -630,7 +630,7 @@ class DetectionPipeline:
 
         if detections:
             parts = [f"{d.label}  {round(d.confidence * 100)}%" for d in detections]
-            det_str = '   ·   '.join(parts)
+            det_str = '   |   '.join(parts)
         else:
             det_str = ''
 
@@ -643,7 +643,7 @@ class DetectionPipeline:
         fg = (210, 210, 210)
         text_y = h - bar_h + 24
 
-        left_str = f"{cam_name}  ·  {time_str}"
+        left_str = f"{cam_name}  -  {time_str}"
         cv2.putText(frame, left_str, (8, text_y), font, scale, fg, thick, cv2.LINE_AA)
 
         if det_str:

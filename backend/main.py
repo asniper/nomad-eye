@@ -60,10 +60,15 @@ async def lifespan(app: FastAPI):
     qkv = {r[0]: r[1] for r in quality_rows}
     motion_row = db.execute("SELECT value FROM app_config WHERE key='motion_threshold'").fetchone()
     initial_motion_threshold = int(motion_row[0]) if motion_row else None
+    classes_row = db.execute("SELECT value FROM app_config WHERE key='detection_classes'").fetchone()
     db.close()
 
+    from api.routes.settings import _parse_classes
+    initial_classes = _parse_classes(classes_row[0] if classes_row else None)
+
     pipeline = DetectionPipeline([], model_name=initial_model,
-                                 confidences=initial_confidences if initial_confidences else None)
+                                 confidences=initial_confidences if initial_confidences else None,
+                                 classes=initial_classes)
     pipeline.set_face_confidence(initial_face_confidence)
     if initial_motion_threshold is not None:
         pipeline.set_motion_threshold(initial_motion_threshold)
