@@ -168,12 +168,17 @@ async def scan_and_refresh(db: sqlite3.Connection = None) -> list:
         # Must run before prune_dead_and_get_state so reload_camera can find them in the pipeline.
         with _pipeline._lock:
             dead_in_pipeline = [
-                (c.camera_id, c.device_path)
+                (c.camera_id, c.device_path, c.usb_id)
                 for c in _pipeline._cameras
                 if not c.is_alive()
             ]
-        for cam_id, device_path in dead_in_pipeline:
+        for cam_id, device_path, cam_usb_id in dead_in_pipeline:
             if not os.path.exists(device_path):
+                continue
+            # Verify the same physical camera is still at this path.
+            # If a different camera was plugged into the same USB slot it would get
+            # the same /dev/videoN node, causing recovery to hijack the new device.
+            if _get_usb_id(device_path) != cam_usb_id:
                 continue
             row = _db.execute(
                 "SELECT enabled FROM cameras WHERE camera_id=? AND deleted=0", (cam_id,)
