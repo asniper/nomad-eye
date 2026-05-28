@@ -1030,16 +1030,35 @@ function UpdateCard() {
     try {
       await systemApi.update()
       const start = Date.now()
+      let seenInProgress = false
       pollRef.current = setInterval(async () => {
         if (Date.now() - start > 360000) {
-          clearInterval(pollRef.current); setInstalling(false); setError('Update timed out — check service manually')
+          clearInterval(pollRef.current); setInstalling(false)
+          setError('Update timed out — check service manually')
           return
         }
         try {
-          await systemApi.updateStatus()
-          clearInterval(pollRef.current); setInstalling(false); setInstallDone(true)
+          const r = await systemApi.updateStatus()
+          const s = r.data
+          if (s.update_in_progress) { seenInProgress = true; return }
+          if (!seenInProgress) return
+          clearInterval(pollRef.current); setInstalling(false)
+          if (s.last_result === 'success') {
+            setInstallDone(true)
+            setTimeout(() => { setInstallDone(false); check() }, 5000)
+          } else {
+            setError(
+              s.last_result === 'no_release' ? 'No release found' :
+              s.last_result?.startsWith('error:') ? s.last_result.slice(6).trim() :
+              s.last_result || 'Update failed'
+            )
+          }
+        } catch {
+          // Network error = service restarting after successful update
+          clearInterval(pollRef.current); setInstalling(false)
+          setInstallDone(true)
           setTimeout(() => { setInstallDone(false); check() }, 5000)
-        } catch {}
+        }
       }, 3000)
     } catch (e) {
       setInstalling(false)
