@@ -476,7 +476,7 @@ class DetectionPipeline:
                         else:
                             def _face_work(fr=face_rec, f=frame):
                                 try:
-                                    face_result.extend(fr.detect_and_recognize(f))
+                                    face_result.extend(fr.detect_and_recognize(f, max_dim=480))
                                 except Exception:
                                     pass
                                 face_done.set()
@@ -493,21 +493,28 @@ class DetectionPipeline:
                             face_done.wait(timeout=3.0)
 
                     # Targeted fallback: if face pass found nothing but YOLO found people,
-                    # crop the largest person bbox and run face detection there.
+                    # crop each person's head region, upscale it, and re-run detection.
+                    # More reliable than full-frame HOG for glasses/IR — the upscaling
+                    # gives the detector much more pixels to work with.
                     # Skipped in faces-only mode (no YOLO people available).
-                    FACE_CROP_COOLDOWN = 30.0
+                    FACE_CROP_COOLDOWN = 8.0
                     if (not faces_only and faces_enabled and not face_result and
                             now - self._face_crop_last_run.get(cam.camera_id, 0) >= FACE_CROP_COOLDOWN):
                         people = [d for d in all_detections if d.category == 'people']
                         if people:
                             self._face_crop_last_run[cam.camera_id] = now
-                            largest = max(people, key=lambda d: (d.bbox[2]-d.bbox[0])*(d.bbox[3]-d.bbox[1]))
-                            def _crop_work(fr=face_rec, f=frame.copy(), bbox=largest.bbox):
+                            crop_result = []
+                            crop_done = threading.Event()
+                            def _crop_work(fr=face_rec, f=frame.copy(),
+                                           bboxes=[d.bbox for d in people], out=crop_result, ev=crop_done):
                                 try:
-                                    fr.detect_in_crops(f, [bbox])
+                                    out.extend(fr.detect_in_crops(f, bboxes))
                                 except Exception:
                                     pass
+                                ev.set()
                             threading.Thread(target=_crop_work, daemon=True).start()
+                            crop_done.wait(timeout=3.0)
+                            face_result.extend(crop_result)
 
                     all_detections = all_detections + face_result
 
