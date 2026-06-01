@@ -472,6 +472,18 @@ class DetectionPipeline:
                                 face_result.extend(face_rec.detect_and_recognize(frame, max_dim=640))
                             except Exception:
                                 pass
+                            # If full-frame scan missed (common with glasses/IR), do a second
+                            # pass cropping the motion region — same upscale trick as the YOLO
+                            # person-crop path but using motion bbox as the person proxy.
+                            if not face_result:
+                                motion_bbox = self._motion_bboxes.get(cam.camera_id)
+                                if (motion_bbox and
+                                        now - self._face_crop_last_run.get(cam.camera_id, 0) >= 8.0):
+                                    self._face_crop_last_run[cam.camera_id] = now
+                                    try:
+                                        face_result.extend(face_rec.detect_in_crops(frame, [motion_bbox]))
+                                    except Exception:
+                                        pass
                             face_done.set()
                         else:
                             def _face_work(fr=face_rec, f=frame):
