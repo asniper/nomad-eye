@@ -52,6 +52,9 @@ async def lifespan(app: FastAPI):
     enabled_rows = db.execute(
         "SELECT key, value FROM app_config WHERE key LIKE 'category_enabled_%'"
     ).fetchall()
+    face_cam_rows = db.execute(
+        "SELECT camera_id, face_detection_enabled, face_sensitivity FROM cameras WHERE deleted=0"
+    ).fetchall()
     ai_row = db.execute("SELECT value FROM app_config WHERE key='ai_enabled'").fetchone()
     initial_ai_enabled = (ai_row[0] != '0') if ai_row else True
     quality_rows = db.execute(
@@ -83,6 +86,12 @@ async def lifespan(app: FastAPI):
         if row[1] == '0':
             pipeline.set_category_enabled(category, False)
     pipeline.set_ai_enabled(initial_ai_enabled)
+    for row in face_cam_rows:
+        cid = row[0]
+        if row[1] is not None and not row[1]:
+            pipeline.set_camera_face_enabled(cid, False)
+        if row[2]:
+            pipeline.set_camera_face_sensitivity(cid, row[2])
     try:
         pipeline.set_video_quality(
             int(qkv.get('video_width', 1280)),

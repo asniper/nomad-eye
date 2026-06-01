@@ -34,6 +34,11 @@ class AdjustmentsBody(BaseModel):
     sw_contrast: float = 1.0
 
 
+class FaceSettingsBody(BaseModel):
+    face_detection_enabled: Optional[bool] = None
+    face_sensitivity: Optional[str] = None
+
+
 def _get_usb_id(video_path: str) -> str:
     """Return a stable USB identifier for a /dev/videoN device.
 
@@ -91,7 +96,7 @@ def _get_present_usb_ids() -> set:
 def _build_camera_list(db: sqlite3.Connection) -> list:
     """Return the full camera list (non-deleted) with live pipeline state overlaid."""
     db_cams = db.execute(
-        "SELECT camera_id, usb_id, name, last_seen, enabled FROM cameras WHERE deleted=0 ORDER BY camera_id"
+        "SELECT camera_id, usb_id, name, last_seen, enabled, face_detection_enabled, face_sensitivity FROM cameras WHERE deleted=0 ORDER BY camera_id"
     ).fetchall()
     event_counts = {
         r['camera_id']: r['cnt']
@@ -122,6 +127,8 @@ def _build_camera_list(db: sqlite3.Connection) -> list:
             "last_seen": row['last_seen'],
             "event_count": event_counts.get(cam_id, 0),
             "enabled": bool(row['enabled']),
+            "face_detection_enabled": bool(row['face_detection_enabled']) if row['face_detection_enabled'] is not None else True,
+            "face_sensitivity": row['face_sensitivity'] or 'normal',
             "width": res_w,
             "height": res_h,
             "stream_fps": res_fps,
@@ -374,6 +381,39 @@ def reset_tracking(camera_id: int, _=Depends(require_auth)):
     if _pipeline:
         _pipeline.reset_tracking(camera_id)
     return {"ok": True}
+
+
+@router.patch("/{camera_id}/face-settings")
+def set_face_settings(
+    camera_id: int,
+    body: FaceSettingsBody,
+    db: sqlite3.Connection = Depends(get_db),
+    _=Depends(require_auth),
+):
+    if body.face_detection_enabled is not None:
+        db.execute("UPDATE cameras SET face_detection_enabled=? WHERE camera_id=?",
+                   (1 if body.face_detection_enabled else 0, camera_id))
+    if body.face_sensitivity is not None:
+        if body.face_sensitivity not in ('fast', 'normal', 'thorough'):
+            raise HTTPException(status_code=400, detail="sensitivity must be fast, normal, or thorough")
+        db.execute("UPDATE cameras SET face_sensitivity=? WHERE camera_id=?",
+                   (body.face_sensitivity, camera_id))
+    db.commit()
+    if _pipeline is not None:
+        enabled = body.face_detection_enabled
+        sensitivity = body.face_sensitivity
+        if enabled is not None:
+            _pipeline.set_camera_face_enabled(camera_id, enabled)
+        if sensitivity is not None:
+            _pipeline.set_camera_face_sensitivity(camera_id, sensitivity)
+    row = db.execute(
+        "SELECT face_detection_enabled, face_sensitivity FROM cameras WHERE camera_id=?", (camera_id,)
+    ).fetchone()
+    return {
+        "camera_id": camera_id,
+        "face_detection_enabled": bool(row['face_detection_enabled']),
+        "face_sensitivity": row['face_sensitivity'],
+    }
 
 
 @router.post("/{camera_id}/overlay")

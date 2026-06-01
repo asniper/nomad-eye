@@ -136,6 +136,8 @@ class DetectionPipeline:
         self._face_last_run: dict = {}        # camera_id -> timestamp of last face detection
         self._face_crop_last_run: dict = {}   # camera_id -> timestamp of last targeted crop detection
         self._last_periodic_scan: dict = {}   # camera_id -> timestamp of last no-motion YOLO scan
+        self._face_cam_enabled: dict = {}     # camera_id -> bool, default True
+        self._face_cam_sensitivity: dict = {} # camera_id -> 'fast'|'normal'|'thorough', default 'normal'
         self._ai_enabled: bool = True
         self._video_width: int = 1280
         self._video_height: int = 720
@@ -186,6 +188,13 @@ class DetectionPipeline:
 
     def set_face_confidence(self, value: float):
         self._face_recognizer.set_min_confidence(value)
+
+    def set_camera_face_enabled(self, camera_id: int, enabled: bool):
+        self._face_cam_enabled[camera_id] = enabled
+
+    def set_camera_face_sensitivity(self, camera_id: int, sensitivity: str):
+        if sensitivity in ('fast', 'normal', 'thorough'):
+            self._face_cam_sensitivity[camera_id] = sensitivity
 
     def set_ai_enabled(self, enabled: bool):
         self._ai_enabled = enabled
@@ -452,11 +461,13 @@ class DetectionPipeline:
                         detector = self._object_detector
                         face_rec = self._face_recognizer
 
-                    faces_enabled = 'faces' in self._enabled_categories
+                    faces_enabled = ('faces' in self._enabled_categories and
+                                     self._face_cam_enabled.get(cam.camera_id, True))
+                    cam_face_sensitivity = self._face_cam_sensitivity.get(cam.camera_id, 'normal')
                     # When all non-face categories are disabled, skip YOLO entirely.
                     # Face detection runs alone, faster, at higher resolution.
                     yolo_categories = self._enabled_categories - {'faces'}
-                    faces_only = faces_enabled and not yolo_categories
+                    faces_only = ('faces' in self._enabled_categories) and not yolo_categories
 
                     # Face cooldown: 3s when running alone (no YOLO competing), 10s otherwise.
                     FACE_COOLDOWN_SECS = 3.0 if faces_only else 10.0
@@ -469,7 +480,8 @@ class DetectionPipeline:
                         # Pass a higher max-dim so small/distant faces have more pixels.
                         if faces_only:
                             try:
-                                face_result.extend(face_rec.detect_and_recognize(frame, max_dim=640))
+                                face_result.extend(face_rec.detect_and_recognize(
+                                    frame, max_dim=640, sensitivity=cam_face_sensitivity))
                             except Exception:
                                 pass
                             # If full-frame scan missed (common with glasses/IR), do a second
@@ -486,9 +498,9 @@ class DetectionPipeline:
                                         pass
                             face_done.set()
                         else:
-                            def _face_work(fr=face_rec, f=frame):
+                            def _face_work(fr=face_rec, f=frame, sens=cam_face_sensitivity):
                                 try:
-                                    face_result.extend(fr.detect_and_recognize(f, max_dim=480))
+                                    face_result.extend(fr.detect_and_recognize(f, max_dim=480, sensitivity=sens))
                                 except Exception:
                                     pass
                                 face_done.set()

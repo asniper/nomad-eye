@@ -24,6 +24,7 @@ export const cameras = {
   setEnabled: (id, enabled) => api.post(`/cameras/${id}/enabled?enabled=${enabled}`),
   getControls: (id) => api.get(`/cameras/${id}/controls`),
   setAdjustments: (id, data) => api.patch(`/cameras/${id}/adjustments`, data),
+  setFaceSettings: (id, data) => api.patch(`/cameras/${id}/face-settings`, data),
 }
 
 export const detections = {

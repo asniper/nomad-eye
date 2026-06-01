@@ -194,6 +194,79 @@ function AdjustPanel({ camId }) {
   )
 }
 
+function FacePanel({ cam, onUpdate }) {
+  const [enabled, setEnabled] = useState(cam.face_detection_enabled ?? true)
+  const [sensitivity, setSensitivity] = useState(cam.face_sensitivity ?? 'normal')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  const save = async (patch) => {
+    setSaving(true)
+    try {
+      await cameras.setFaceSettings(cam.id, patch)
+      setSaved(true)
+      if (onUpdate) onUpdate({ ...cam, ...patch })
+      setTimeout(() => setSaved(false), 2000)
+    } catch {}
+    setSaving(false)
+  }
+
+  const handleEnabled = async (val) => {
+    setEnabled(val)
+    await save({ face_detection_enabled: val })
+  }
+
+  const handleSensitivity = async (val) => {
+    setSensitivity(val)
+    await save({ face_sensitivity: val })
+  }
+
+  return (
+    <div className="rounded-lg bg-[#1A1A1A] border border-[#3A3A3A] px-4 py-3 space-y-4">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-gray-500 uppercase tracking-wider">Face Detection</span>
+        {saved && <span className="text-xs text-green-400">Saved ✓</span>}
+        {saving && !saved && <span className="text-xs text-gray-500">Saving…</span>}
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-white">Enabled</p>
+          <p className="text-xs text-gray-500 mt-0.5">Detect and recognize faces on this camera</p>
+        </div>
+        <button
+          onClick={() => handleEnabled(!enabled)}
+          className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors"
+          style={{ background: enabled ? '#FFB800' : '#3A3A3A' }}
+        >
+          <span
+            className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"
+            style={{ transform: enabled ? 'translateX(1.4rem)' : 'translateX(0.2rem)' }}
+          />
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm text-white">Sensitivity</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Fast: ~0.5s · Normal: ~1.1s fallback · Thorough: ~2s
+          </p>
+        </div>
+        <select
+          value={sensitivity}
+          onChange={e => handleSensitivity(e.target.value)}
+          className="bg-[#3A3A3A] border border-[#484848] rounded-md px-2 py-1 text-sm text-white focus:outline-none shrink-0"
+        >
+          <option value="fast">Fast</option>
+          <option value="normal">Normal</option>
+          <option value="thorough">Thorough</option>
+        </select>
+      </div>
+    </div>
+  )
+}
+
 function DebugPanel({ info }) {
   if (!info || Object.keys(info).length === 0) {
     return (
@@ -345,6 +418,7 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
   const [resetDone, setResetDone] = useState(false)
   const [showDetections, setShowDetections] = useState(false)
   const [showAdjust, setShowAdjust] = useState(false)
+  const [showFace, setShowFace] = useState(false)
   const [debugMode, setDebugMode] = useState(false)
   const [debugInfo, setDebugInfo] = useState(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -559,6 +633,14 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
           >
             Adjust
           </button>
+          <button
+            onClick={() => setShowFace(p => !p)}
+            className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+            style={showFace ? { background: '#4c3a6e', color: '#C084FC' } : { background: '#3A3A3A', color: '#A855F7' }}
+            title="Face detection settings"
+          >
+            Face
+          </button>
         </div>
       </div>
 
@@ -616,6 +698,10 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
 
       {showAdjust && (
         <AdjustPanel camId={cam.id} />
+      )}
+
+      {showFace && (
+        <FacePanel cam={cam} />
       )}
 
       <button

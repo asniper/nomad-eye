@@ -81,8 +81,12 @@ class FaceRecognizer:
     # ------------------------------------------------------------------
     # Public: detect + recognize faces, returns Detection-compatible list
     # ------------------------------------------------------------------
-    def detect_and_recognize(self, frame: np.ndarray, max_dim: int = _DETECTION_MAX_DIM) -> list:
-        """Returns list of Detection(label, category='faces', confidence, bbox)."""
+    def detect_and_recognize(self, frame: np.ndarray, max_dim: int = _DETECTION_MAX_DIM,
+                             sensitivity: str = 'normal') -> list:
+        """Returns list of Detection(label, category='faces', confidence, bbox).
+
+        sensitivity: 'fast' (upsample=1 only), 'normal' (1.5x fallback), 'thorough' (upsample=2)
+        """
         if not _face_sem.acquire(timeout=2.0):
             return []  # other camera held the lock for too long; skip this frame
 
@@ -94,7 +98,7 @@ class FaceRecognizer:
             else:
                 small = frame
 
-            results = self._detect_fr(small) if _HAS_FR else self._detect_opencv(small)
+            results = self._detect_fr(small, sensitivity) if _HAS_FR else self._detect_opencv(small)
 
             if scale < 1.0:
                 from detection.detector import Detection
@@ -155,14 +159,26 @@ class FaceRecognizer:
     # ------------------------------------------------------------------
     # face_recognition (dlib) path
     # ------------------------------------------------------------------
-    def _detect_fr(self, frame: np.ndarray) -> list:
+    def _detect_fr(self, frame: np.ndarray, sensitivity: str = 'normal') -> list:
         from detection.detector import Detection
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        # Try upsample=1 first (fast). Fall back to upsample=2 if nothing found —
-        # catches faces that are small or partially turned at this camera distance.
-        locations = _fr.face_locations(rgb, number_of_times_to_upsample=1, model='hog')
-        if not locations:
+
+        if sensitivity == 'fast':
+            locations = _fr.face_locations(rgb, number_of_times_to_upsample=1, model='hog')
+        elif sensitivity == 'thorough':
             locations = _fr.face_locations(rgb, number_of_times_to_upsample=2, model='hog')
+        else:  # 'normal': upsample=1 with 1.5x upscale fallback
+            locations = _fr.face_locations(rgb, number_of_times_to_upsample=1, model='hog')
+            if not locations:
+                h, w = rgb.shape[:2]
+                rgb_big = cv2.resize(rgb, (int(w * 1.5), int(h * 1.5)))
+                locs_big = _fr.face_locations(rgb_big, number_of_times_to_upsample=1, model='hog')
+                if locs_big:
+                    inv = 1 / 1.5
+                    locations = [(max(0, int(t * inv)), max(0, int(r * inv)),
+                                  max(0, int(b * inv)), max(0, int(l * inv)))
+                                 for t, r, b, l in locs_big]
+
         if not locations:
             return []
         encodings = _fr.face_encodings(rgb, locations)
