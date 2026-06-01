@@ -158,7 +158,11 @@ class FaceRecognizer:
     def _detect_fr(self, frame: np.ndarray) -> list:
         from detection.detector import Detection
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        locations = _fr.face_locations(rgb, model='hog')
+        # Try upsample=1 first (fast). Fall back to upsample=2 if nothing found —
+        # catches faces that are small or partially turned at this camera distance.
+        locations = _fr.face_locations(rgb, number_of_times_to_upsample=1, model='hog')
+        if not locations:
+            locations = _fr.face_locations(rgb, number_of_times_to_upsample=2, model='hog')
         if not locations:
             return []
         encodings = _fr.face_encodings(rgb, locations)
