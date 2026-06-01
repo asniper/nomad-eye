@@ -119,6 +119,44 @@ MODELS = [
 _MODELS_BY_KEY = {m["key"]: m for m in MODELS}
 
 
+def _compute_iou(a: tuple, b: tuple) -> float:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+    if inter == 0:
+        return 0.0
+    union = (ax2 - ax1) * (ay2 - ay1) + (bx2 - bx1) * (by2 - by1) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _apply_nms(detections: List['Detection']) -> List['Detection']:
+    """Cross-class NMS: drop overlapping boxes that represent the same object.
+
+    Same-category pairs are suppressed at IoU > 0.5 (standard NMS).
+    Cross-category pairs are suppressed at IoU > 0.85 — catches cases like a
+    person/chair combination firing as both 'person' and 'cat' (misclassification
+    where two model classes fire on the same region).
+    Higher-confidence box always wins; detections are sorted before comparison.
+    """
+    if len(detections) <= 1:
+        return detections
+    dets = sorted(detections, key=lambda d: d.confidence, reverse=True)
+    suppressed = [False] * len(dets)
+    for i in range(len(dets)):
+        if suppressed[i]:
+            continue
+        for j in range(i + 1, len(dets)):
+            if suppressed[j]:
+                continue
+            iou = _compute_iou(dets[i].bbox, dets[j].bbox)
+            same_cat = dets[i].category == dets[j].category
+            if (same_cat and iou > 0.5) or (not same_cat and iou > 0.85):
+                suppressed[j] = True
+    return [d for d, s in zip(dets, suppressed) if not s]
+
+
 def _classify_open_vocab(label: str) -> str:
     """Map a free-text class label to our category system."""
     l = label.lower().strip()
@@ -187,7 +225,7 @@ class ObjectDetector:
                 continue
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             detections.append(Detection(label=label, category=category, confidence=confidence, bbox=(x1, y1, x2, y2)))
-        return detections
+        return _apply_nms(detections)
 
 
 class YOLOWorldDetector:
@@ -222,7 +260,7 @@ class YOLOWorldDetector:
                 continue
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             detections.append(Detection(label=label, category=category, confidence=confidence, bbox=(x1, y1, x2, y2)))
-        return detections
+        return _apply_nms(detections)
 
 
 class MegaDetectorDetector:
@@ -287,7 +325,7 @@ class MegaDetectorDetector:
                 label=label, category=category, confidence=confidence,
                 bbox=(int(x1), int(y1), int(x2), int(y2)),
             ))
-        return detections
+        return _apply_nms(detections)
 
 
 class OWLv2Detector:
@@ -338,7 +376,7 @@ class OWLv2Detector:
                 continue
             x1, y1, x2, y2 = map(int, box)
             detections.append(Detection(label=label, category=category, confidence=confidence, bbox=(x1, y1, x2, y2)))
-        return detections
+        return _apply_nms(detections)
 
 
 class GroundingDINODetector:
@@ -389,7 +427,7 @@ class GroundingDINODetector:
                 continue
             x1, y1, x2, y2 = map(int, box)
             detections.append(Detection(label=label_str, category=category, confidence=confidence, bbox=(x1, y1, x2, y2)))
-        return detections
+        return _apply_nms(detections)
 
 
 def create_detector(model_key: str, classes: list = None, confidences: dict = None):

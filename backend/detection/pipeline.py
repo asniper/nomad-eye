@@ -82,6 +82,27 @@ def _match_detection(detection, active_events, frame_shape):
         dist = ((d_cx - e_cx) ** 2 + (d_cy - e_cy) ** 2) ** 0.5
         if dist < max_dist and dist < best_dist:
             best, best_dist = ev, dist
+    if best is not None:
+        return best
+    # Fallback: same category + overlapping box — same physical object detected
+    # under two different label names (e.g. "cat" event vs new "house cat" detection).
+    for ev in active_events:
+        if ev['category'] != detection.category:
+            continue
+        ax1, ay1, ax2, ay2 = detection.bbox
+        bx1, by1, bx2, by2 = ev['bbox']
+        ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+        ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+        inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+        if inter > 0:
+            union = (ax2 - ax1) * (ay2 - ay1) + (bx2 - bx1) * (by2 - by1) - inter
+            iou = inter / union if union > 0 else 0.0
+            if iou > 0.4:
+                e_cx = (bx1 + bx2) / 2
+                e_cy = (by1 + by2) / 2
+                dist = ((d_cx - e_cx) ** 2 + (d_cy - e_cy) ** 2) ** 0.5
+                if dist < max_dist and dist < best_dist:
+                    best, best_dist = ev, dist
     return best
 
 class DetectionPipeline:
