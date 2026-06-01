@@ -544,7 +544,10 @@ class DetectionPipeline:
                     last_yolo_ms = round(elapsed * 1000)
                     last_yolo_time = now
 
-                    detections = [d for d in all_detections if _bbox_has_motion(motion_mask, d.bbox)]
+                    # Faces are exempt from the motion filter — you want to know who is
+                    # present regardless of whether the face region itself is moving.
+                    detections = [d for d in all_detections
+                                  if d.category == 'faces' or _bbox_has_motion(motion_mask, d.bbox)]
                     self._handle_detections(cam, frame, detections, now)
                     if not detections:
                         # Motion present but YOLO found nothing in the motion area — clear overlay
