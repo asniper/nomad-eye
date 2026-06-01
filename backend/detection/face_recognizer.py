@@ -19,8 +19,8 @@ _MATCH_THRESHOLD_HIST = 0.82   # cosine similarity: higher = stricter (OpenCV fa
 _MIN_FACE_PX = 15              # minimum face size in the detection image
 _DETECTION_MAX_DIM = 320       # downsample to this max dim before HOG detection
 
-# CLAHE for contrast enhancement — helps HOG detect faces under IR/night vision
-# and when subject is wearing glasses (both reduce gradient clarity).
+# CLAHE for contrast enhancement on upscaled crops (glasses/IR fallback path).
+# NOT used on the full-frame scan — over-enhancement breaks HOG gradient patterns.
 _clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
 # Auto-sample building for known faces
@@ -158,14 +158,9 @@ class FaceRecognizer:
     def _detect_fr(self, frame: np.ndarray) -> list:
         from detection.detector import Detection
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        # Enhance local contrast before HOG detection — helps under IR/night vision
-        # and with glasses, which both flatten the gradient patterns HOG relies on.
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        enhanced = cv2.cvtColor(_clahe.apply(gray), cv2.COLOR_GRAY2RGB)
-        locations = _fr.face_locations(enhanced, model='hog')
+        locations = _fr.face_locations(rgb, model='hog')
         if not locations:
             return []
-        # Encode from the original RGB so stored embeddings stay comparable.
         encodings = _fr.face_encodings(rgb, locations)
         results = []
         for (top, right, bottom, left), enc in zip(locations, encodings):
@@ -202,7 +197,6 @@ class FaceRecognizer:
     def _detect_opencv(self, frame: np.ndarray) -> list:
         from detection.detector import Detection
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = _clahe.apply(gray)
         faces = self._cascade.detectMultiScale(
             gray, scaleFactor=1.1, minNeighbors=4,
             minSize=(_MIN_FACE_PX, _MIN_FACE_PX))

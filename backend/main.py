@@ -66,7 +66,13 @@ async def lifespan(app: FastAPI):
     from api.routes.settings import _parse_classes
     initial_classes = _parse_classes(classes_row[0] if classes_row else None)
 
-    pipeline = DetectionPipeline([], model_name=initial_model,
+    # If only face detection is enabled, skip loading the YOLO model entirely —
+    # it's never used in faces-only mode and loading YOLOWorld takes 2+ minutes.
+    enabled_cats = {r[0][len('category_enabled_'):] for r in enabled_rows if r[1] != '0'}
+    yolo_needed = bool(enabled_cats - {'faces'})
+    effective_model = initial_model if yolo_needed else 'yolov8n'
+
+    pipeline = DetectionPipeline([], model_name=effective_model,
                                  confidences=initial_confidences if initial_confidences else None,
                                  classes=initial_classes)
     pipeline.set_face_confidence(initial_face_confidence)
