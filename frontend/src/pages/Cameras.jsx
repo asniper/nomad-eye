@@ -199,16 +199,20 @@ function FacePanel({ cam, onUpdate }) {
   const [sensitivity, setSensitivity] = useState(cam.face_sensitivity ?? 'normal')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState(null)
 
   const save = async (patch) => {
-    setSaving(true)
+    setSaving(true); setSaveError(null)
     try {
       await cameras.setFaceSettings(cam.id, patch)
       setSaved(true)
-      if (onUpdate) onUpdate({ ...cam, ...patch })
+      if (onUpdate) onUpdate(patch)
       setTimeout(() => setSaved(false), 2000)
-    } catch {}
-    setSaving(false)
+    } catch (e) {
+      setSaveError(e?.response?.data?.detail || 'Save failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleEnabled = async (val) => {
@@ -227,6 +231,7 @@ function FacePanel({ cam, onUpdate }) {
         <span className="text-xs text-gray-500 uppercase tracking-wider">Face Detection</span>
         {saved && <span className="text-xs text-green-400">Saved ✓</span>}
         {saving && !saved && <span className="text-xs text-gray-500">Saving…</span>}
+        {saveError && <span className="text-xs text-red-400">{saveError}</span>}
       </div>
 
       <div className="flex items-center justify-between">
@@ -398,6 +403,7 @@ function OfflineToggle({ cam, onEnabledChange }) {
 function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
   const imgRef = useRef(null)
   const wsRef = useRef(null)
+  const [camData, setCamData] = useState(cam)
   const [overlay, setOverlay] = useState(true)
   const [hiddenCategories, setHiddenCategories] = useState(() => {
     try {
@@ -701,7 +707,7 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
       )}
 
       {showFace && (
-        <FacePanel cam={cam} />
+        <FacePanel cam={camData} onUpdate={patch => setCamData(prev => ({ ...prev, ...patch }))} />
       )}
 
       <button
