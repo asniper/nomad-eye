@@ -240,32 +240,32 @@ export default function Settings() {
         </SettingRow>
         {(allSettings.sms_provider ?? 'twilio') === 'twilio' && (<>
         <SettingRow label="Account SID">
-          <TextInput keyName="twilio_account_sid" current={allSettings.twilio_account_sid ?? ''} onSave={saveSetting} saving={saving.twilio_account_sid} saved={saved.twilio_account_sid} placeholder="ACxxxxxxxxxxxxxxxx" />
+          <TextInput keyName="twilio_account_sid" current={allSettings.twilio_account_sid ?? ''} onSave={saveSetting} saving={saving.twilio_account_sid} saved={saved.twilio_account_sid} error={errors.twilio_account_sid} placeholder="ACxxxxxxxxxxxxxxxx" />
         </SettingRow>
         <SettingRow label="Auth Token">
-          <TextInput keyName="twilio_auth_token" current={allSettings.twilio_auth_token ?? ''} onSave={saveSetting} saving={saving.twilio_auth_token} saved={saved.twilio_auth_token} placeholder="••••••••" secret />
+          <TextInput keyName="twilio_auth_token" current={allSettings.twilio_auth_token ?? ''} onSave={saveSetting} saving={saving.twilio_auth_token} saved={saved.twilio_auth_token} error={errors.twilio_auth_token} placeholder="••••••••" secret />
         </SettingRow>
         <SettingRow label="From Number">
-          <TextInput keyName="twilio_from_number" current={allSettings.twilio_from_number ?? ''} onSave={saveSetting} saving={saving.twilio_from_number} saved={saved.twilio_from_number} placeholder="+1234567890" />
+          <TextInput keyName="twilio_from_number" current={allSettings.twilio_from_number ?? ''} onSave={saveSetting} saving={saving.twilio_from_number} saved={saved.twilio_from_number} error={errors.twilio_from_number} placeholder="+1234567890" />
         </SettingRow>
         </>)}
       </Card>
 
       <Card title="Email (SMTP)">
         <SettingRow label="SMTP Host">
-          <TextInput keyName="smtp_host" current={allSettings.smtp_host ?? ''} onSave={saveSetting} saving={saving.smtp_host} saved={saved.smtp_host} placeholder="smtp.gmail.com" />
+          <TextInput keyName="smtp_host" current={allSettings.smtp_host ?? ''} onSave={saveSetting} saving={saving.smtp_host} saved={saved.smtp_host} error={errors.smtp_host} placeholder="smtp.gmail.com" />
         </SettingRow>
         <SettingRow label="SMTP Port">
           <NumberInput keyName="smtp_port" current={allSettings.smtp_port ?? 587} min={1} max={65535} step={1} onSave={saveSetting} saving={saving.smtp_port} saved={saved.smtp_port} />
         </SettingRow>
         <SettingRow label="Username">
-          <TextInput keyName="smtp_username" current={allSettings.smtp_username ?? ''} onSave={saveSetting} saving={saving.smtp_username} saved={saved.smtp_username} placeholder="you@gmail.com" />
+          <TextInput keyName="smtp_username" current={allSettings.smtp_username ?? ''} onSave={saveSetting} saving={saving.smtp_username} saved={saved.smtp_username} error={errors.smtp_username} placeholder="you@gmail.com" />
         </SettingRow>
         <SettingRow label="Password">
-          <TextInput keyName="smtp_password" current={allSettings.smtp_password ?? ''} onSave={saveSetting} saving={saving.smtp_password} saved={saved.smtp_password} placeholder="••••••••" secret />
+          <TextInput keyName="smtp_password" current={allSettings.smtp_password ?? ''} onSave={saveSetting} saving={saving.smtp_password} saved={saved.smtp_password} error={errors.smtp_password} placeholder="••••••••" secret />
         </SettingRow>
         <SettingRow label="From Address">
-          <TextInput keyName="smtp_from" current={allSettings.smtp_from ?? ''} onSave={saveSetting} saving={saving.smtp_from} saved={saved.smtp_from} placeholder="nomadeye@example.com" />
+          <TextInput keyName="smtp_from" current={allSettings.smtp_from ?? ''} onSave={saveSetting} saving={saving.smtp_from} saved={saved.smtp_from} error={errors.smtp_from} placeholder="nomadeye@example.com" />
         </SettingRow>
       </Card>
 
@@ -1995,28 +1995,33 @@ function ConfidenceSliders({ allSettings, onSave, saving, saved }) {
   )
 }
 
-function TextInput({ keyName, current, onSave, saving, saved, placeholder, secret }) {
+function TextInput({ keyName, current, onSave, saving, saved, error, placeholder, secret }) {
   const [val, setVal] = useState(current)
   const dirty = val !== current && val !== ''
+  const canSave = !saving && !!val
   return (
-    <div className="flex items-center gap-2">
-      <input
-        type={secret ? 'password' : 'text'}
-        value={val}
-        onChange={e => setVal(e.target.value)}
-        placeholder={placeholder}
-        className={`${inputCls} w-full sm:w-64`}
-        onFocus={e => e.target.style.borderColor = '#151925'}
-        onBlur={e => e.target.style.borderColor = '#484848'}
-      />
-      <button
-        onClick={() => onSave(keyName, val)}
-        disabled={saving || (!val && !dirty)}
-        className="px-3 py-1.5 disabled:opacity-40 text-white text-sm rounded-md transition-opacity hover:opacity-90"
-        style={{ background: '#FFB800', color: '#151925' }}
-      >
-        {saving ? 'Saving...' : saved ? 'Saved ✓' : 'Save'}
-      </button>
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        <input
+          type={secret ? 'password' : 'text'}
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && canSave) onSave(keyName, val) }}
+          placeholder={placeholder}
+          className={`${inputCls} w-full sm:w-64`}
+          onFocus={e => e.target.style.borderColor = '#151925'}
+          onBlur={e => e.target.style.borderColor = '#484848'}
+        />
+        <button
+          onClick={() => onSave(keyName, val)}
+          disabled={!canSave}
+          className="px-3 py-1.5 disabled:opacity-40 text-white text-sm rounded-md transition-opacity hover:opacity-90"
+          style={{ background: '#FFB800', color: '#151925' }}
+        >
+          {saving ? 'Saving...' : saved ? 'Saved ✓' : 'Save'}
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </div>
   )
 }
