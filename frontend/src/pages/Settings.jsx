@@ -1001,17 +1001,66 @@ function UpdateCard() {
   const [installDone, setInstallDone] = useState(false)
   const [error, setError] = useState(null)
   const pollRef = useRef(null)
+  const checkRef = useRef(null)
 
   const check = useCallback(async () => {
     setChecking(true); setError(null)
     try {
       const r = await systemApi.updateStatus()
       setStatus(r.data)
-    } catch { setError('Could not reach update service') }
+      return r.data
+    } catch { setError('Could not reach update service'); return null }
     finally { setChecking(false) }
   }, [])
 
-  useEffect(() => { check() }, [check])
+  useEffect(() => { checkRef.current = check }, [check])
+
+  // beginPoll starts the interval. alreadyInProgress=true skips waiting for
+  // update_in_progress to become true first (used when resuming after a page refresh).
+  const beginPoll = useCallback((alreadyInProgress = false) => {
+    if (pollRef.current) return
+    setInstalling(true)
+    const start = Date.now()
+    let seenInProgress = alreadyInProgress
+    pollRef.current = setInterval(async () => {
+      if (Date.now() - start > 360000) {
+        clearInterval(pollRef.current); pollRef.current = null; setInstalling(false)
+        setError('Update timed out — check service manually')
+        return
+      }
+      try {
+        const r = await systemApi.updateStatus()
+        const s = r.data
+        setStatus(s)
+        if (s.update_in_progress) { seenInProgress = true; return }
+        if (!seenInProgress) return
+        clearInterval(pollRef.current); pollRef.current = null; setInstalling(false)
+        if (s.last_result === 'success') {
+          setInstallDone(true)
+          setTimeout(() => { setInstallDone(false); checkRef.current?.() }, 5000)
+        } else {
+          setError(
+            s.last_result === 'no_release' ? 'No release found' :
+            s.last_result?.startsWith('error:') ? s.last_result.slice(6).trim() :
+            s.last_result || 'Update failed'
+          )
+        }
+      } catch {
+        // Network error = service restarting after successful update
+        clearInterval(pollRef.current); pollRef.current = null; setInstalling(false)
+        setInstallDone(true)
+        setTimeout(() => { setInstallDone(false); checkRef.current?.() }, 5000)
+      }
+    }, 3000)
+  }, [])
+
+  useEffect(() => {
+    check().then(data => {
+      // If an update was already running when the page loaded, resume polling
+      if (data?.update_in_progress) beginPoll(true)
+    })
+  }, [check, beginPoll])
+
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
   const saveUpdateSettings = async (patch) => {
@@ -1026,42 +1075,11 @@ function UpdateCard() {
   }
 
   const install = async () => {
-    setInstalling(true); setError(null)
+    setError(null)
     try {
       await systemApi.update()
-      const start = Date.now()
-      let seenInProgress = false
-      pollRef.current = setInterval(async () => {
-        if (Date.now() - start > 360000) {
-          clearInterval(pollRef.current); setInstalling(false)
-          setError('Update timed out — check service manually')
-          return
-        }
-        try {
-          const r = await systemApi.updateStatus()
-          const s = r.data
-          if (s.update_in_progress) { seenInProgress = true; return }
-          if (!seenInProgress) return
-          clearInterval(pollRef.current); setInstalling(false)
-          if (s.last_result === 'success') {
-            setInstallDone(true)
-            setTimeout(() => { setInstallDone(false); check() }, 5000)
-          } else {
-            setError(
-              s.last_result === 'no_release' ? 'No release found' :
-              s.last_result?.startsWith('error:') ? s.last_result.slice(6).trim() :
-              s.last_result || 'Update failed'
-            )
-          }
-        } catch {
-          // Network error = service restarting after successful update
-          clearInterval(pollRef.current); setInstalling(false)
-          setInstallDone(true)
-          setTimeout(() => { setInstallDone(false); check() }, 5000)
-        }
-      }, 3000)
+      beginPoll(false)
     } catch (e) {
-      setInstalling(false)
       setError(e?.response?.data?.detail || 'Update failed')
     }
   }
@@ -1106,7 +1124,13 @@ function UpdateCard() {
             </div>
           </div>
 
-          {status.update_available && !installing && !installDone && (
+          {installing && !installDone && (
+            <div className="px-3 py-2 rounded-lg text-sm" style={{ background: 'rgba(59,130,246,0.08)', color: '#60A5FA', border: '1px solid rgba(59,130,246,0.2)' }}>
+              <p className="font-medium">Update in progress — do not click again.</p>
+              <p className="text-xs opacity-70 mt-0.5">Takes 2–4 minutes while the frontend rebuilds. The service will restart automatically when done.</p>
+            </div>
+          )}
+          {!installing && status.update_available && !installDone && (
             <div className="px-3 py-2 rounded-lg text-sm" style={{ background: 'rgba(255,184,0,0.08)', color: '#FFB800', border: '1px solid rgba(255,184,0,0.2)' }}>
               Update available
             </div>
@@ -1127,23 +1151,17 @@ function UpdateCard() {
             >
               {checking ? 'Checking…' : 'Check for updates'}
             </button>
-            {(status.update_available || status.update_in_progress) && (
+            {(status.update_available || status.update_in_progress) && !installing && (
               <button
                 onClick={install}
-                disabled={installing || status.update_in_progress}
+                disabled={installing}
                 className="px-3 py-1.5 text-sm rounded-md font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
                 style={{ background: '#FFB800', color: '#151925' }}
               >
-                {installing || status.update_in_progress ? 'Updating…' : 'Install update'}
+                Install update
               </button>
             )}
           </div>
-
-          {installing && (
-            <p className="text-xs text-gray-500">
-              Updating — takes 2–4 minutes while frontend rebuilds. Service will restart automatically.
-            </p>
-          )}
 
           <div className="pt-2 border-t border-[#2E2E2E] space-y-4">
             <div className="flex items-center justify-between gap-4">
