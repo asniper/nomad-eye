@@ -5,6 +5,16 @@ import os
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("BLIS_NUM_THREADS", "1")
 
+# The sudoers entry expects storage-helper.sh at the repo root, but it lives in deploy/.
+# Create the symlink if it's missing — arduino owns /opt/nomad-eye/ so no sudo needed.
+_helper_src = '/opt/nomad-eye/deploy/storage-helper.sh'
+_helper_dst = '/opt/nomad-eye/storage-helper.sh'
+if os.path.exists(_helper_src) and not os.path.lexists(_helper_dst):
+    try:
+        os.symlink(_helper_src, _helper_dst)
+    except OSError:
+        pass
+
 import asyncio
 import sqlite3
 from contextlib import asynccontextmanager

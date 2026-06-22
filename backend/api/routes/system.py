@@ -112,7 +112,7 @@ def perform_update(channel: str):
             subprocess.run(['git', '-C', PROJECT_PATH, 'checkout', tag], check=True, timeout=30)
         subprocess.run(
             ['bash', '-c', f'cd {PROJECT_PATH}/frontend && npm install --prefer-offline && npm run build'],
-            check=False, timeout=300, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            check=True, timeout=300, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         _update_status = {"in_progress": False, "last_result": "success"}
     except Exception as e:
