@@ -37,7 +37,7 @@ async def send_sms(to: str, carrier: str, message: str, image_path: str = None):
         ).fetchall()
         vals = {r['key']: r['value'] for r in rows}
         db.close()
-        if 'twilio_account_sid' not in vals:
-            return
+        if not vals.get('twilio_account_sid') or not vals.get('twilio_auth_token') or not vals.get('twilio_from_number'):
+            raise ValueError("Twilio not configured — set Account SID, Auth Token, and From Number in Settings")
         client = Client(vals['twilio_account_sid'], vals['twilio_auth_token'])
         client.messages.create(to=to, from_=vals['twilio_from_number'], body=message)

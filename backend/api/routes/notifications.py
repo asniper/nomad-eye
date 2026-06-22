@@ -83,15 +83,30 @@ async def test_contact(contact_id: int, db: sqlite3.Connection = Depends(get_db)
     from notifications.sms import send_sms
     from notifications.email import send_email
     from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
     message = f"Nomad Eye test notification\nSent: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+    err_str = None
     try:
         if contact["type"] == "sms":
             await send_sms(contact["address"], contact["carrier"] or "", message, None)
         else:
             await send_email(contact["address"], "Nomad Eye: Test", message, None)
-        return {"ok": True}
+        status = "sent"
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        err_str = str(exc)
+        status = "error"
+    db.execute(
+        """INSERT INTO notification_log
+           (timestamp, contact_id, contact_name, channel, address, camera_id,
+            event_id, labels, message, status, error)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (now, contact["id"], contact["name"], contact["type"], contact["address"],
+         None, None, "Test", message, status, err_str)
+    )
+    db.commit()
+    if err_str:
+        raise HTTPException(status_code=500, detail=err_str)
+    return {"ok": True}
 
 @router.get("/rules")
 def list_rules(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
