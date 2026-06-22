@@ -1235,14 +1235,15 @@ function UpdateCard() {
         if (s.update_in_progress) { seenInProgress = true; return }
         if (!seenInProgress) return
         clearInterval(pollRef.current); pollRef.current = null; setInstalling(false)
-        if (s.last_result === 'success') {
+        if (s.last_result === 'success' || s.last_result == null) {
+          // null means service restarted and wiped in-memory status — counts as success
           setInstallDone(true)
           setTimeout(() => { setInstallDone(false); checkRef.current?.() }, 5000)
         } else {
           setError(
             s.last_result === 'no_release' ? 'No release found' :
             s.last_result?.startsWith('error:') ? s.last_result.slice(6).trim() :
-            s.last_result || 'Update failed'
+            s.last_result
           )
         }
       } catch {
@@ -1278,7 +1279,7 @@ function UpdateCard() {
     setError(null)
     try {
       await systemApi.update()
-      beginPoll(false)
+      beginPoll(true)
     } catch (e) {
       setError(e?.response?.data?.detail || 'Update failed')
     }
