@@ -1,13 +1,13 @@
 import os
 import shutil
 from pathlib import Path
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from models.database import get_db
 from api.routes.auth import require_auth
 from config.settings import get_settings
-from storage.manager import get_active_images_dir
+from storage.manager import get_active_images_dir, get_active_clips_dir
 import sqlite3
 
 router = APIRouter()
@@ -53,26 +53,28 @@ def list_events(
 ):
     query = """
         SELECT
-            event_id,
-            category,
-            label,
-            camera_id,
-            MIN(timestamp) as first_seen,
-            MAX(timestamp) as last_seen,
+            d.event_id,
+            d.category,
+            d.label,
+            d.camera_id,
+            MIN(d.timestamp) as first_seen,
+            MAX(d.timestamp) as last_seen,
             COUNT(*) as screenshot_count,
-            GROUP_CONCAT(id) as detection_ids
-        FROM detections
-        WHERE event_id IS NOT NULL
+            GROUP_CONCAT(d.id) as detection_ids,
+            CASE WHEN ec.event_id IS NOT NULL THEN 1 ELSE 0 END as has_clip
+        FROM detections d
+        LEFT JOIN event_clips ec ON d.event_id = ec.event_id
+        WHERE d.event_id IS NOT NULL
     """
     params = []
     if camera_id is not None:
-        query += " AND camera_id = ?"
+        query += " AND d.camera_id = ?"
         params.append(camera_id)
     if category:
-        query += " AND category = ?"
+        query += " AND d.category = ?"
         params.append(category)
     if label:
-        query += " AND label = ?"
+        query += " AND d.label = ?"
         params.append(label)
     count_query = "SELECT COUNT(DISTINCT event_id) FROM detections WHERE event_id IS NOT NULL"
     count_params = []
@@ -87,7 +89,7 @@ def list_events(
         count_params.append(label)
     total = db.execute(count_query, count_params).fetchone()[0]
 
-    query += " GROUP BY event_id ORDER BY MAX(timestamp) DESC LIMIT ? OFFSET ?"
+    query += " GROUP BY d.event_id ORDER BY MAX(d.timestamp) DESC LIMIT ? OFFSET ?"
     params += [limit, offset]
     rows = db.execute(query, params).fetchall()
     result = []
@@ -188,6 +190,18 @@ def purge_detections(body: PurgeBody, db: sqlite3.Connection = Depends(get_db), 
             db.execute("UPDATE detections SET image_path = NULL WHERE category = ? AND image_path IS NOT NULL", (body.category,))
         db.commit()
 
+    # When purging all records, also delete all clips
+    if not body.images_only and body.category == "all":
+        clip_rows = db.execute("SELECT clip_path FROM event_clips").fetchall()
+        db.execute("DELETE FROM event_clips")
+        db.commit()
+        for r in clip_rows:
+            if r["clip_path"]:
+                try:
+                    os.remove(r["clip_path"])
+                except OSError:
+                    pass
+
     return {"deleted_records": deleted_records, "deleted_images": deleted_images}
 
 
@@ -199,7 +213,13 @@ def delete_event(event_id: str, db: sqlite3.Connection = Depends(get_db), _=Depe
     ).fetchall()
     targeted_paths = {r["image_path"] for r in targeted}
 
+    # Also collect clip path before deleting
+    clip_row = db.execute(
+        "SELECT clip_path FROM event_clips WHERE event_id = ?", (event_id,)
+    ).fetchone()
+
     db.execute("DELETE FROM detections WHERE event_id = ?", (event_id,))
+    db.execute("DELETE FROM event_clips WHERE event_id = ?", (event_id,))
     db.commit()
 
     still_referenced = {
@@ -213,6 +233,77 @@ def delete_event(event_id: str, db: sqlite3.Connection = Depends(get_db), _=Depe
             except OSError:
                 pass
 
+    if clip_row and clip_row["clip_path"]:
+        try:
+            os.remove(clip_row["clip_path"])
+        except OSError:
+            pass
+
+    return {"deleted": event_id}
+
+
+@router.get("/clips/storage")
+def get_clips_storage(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+    rows = db.execute("SELECT clip_path FROM event_clips").fetchall()
+    clip_count = len(rows)
+    clip_bytes = 0
+    for r in rows:
+        if r["clip_path"]:
+            try:
+                clip_bytes += Path(r["clip_path"]).stat().st_size
+            except OSError:
+                pass
+    clips_dir = get_active_clips_dir()
+    return {
+        "clip_count": clip_count,
+        "clip_bytes": clip_bytes,
+        "clips_dir": clips_dir,
+    }
+
+
+@router.delete("/clips")
+def purge_all_clips(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+    rows = db.execute("SELECT clip_path FROM event_clips").fetchall()
+    db.execute("DELETE FROM event_clips")
+    db.commit()
+    deleted = 0
+    for r in rows:
+        if r["clip_path"]:
+            try:
+                os.remove(r["clip_path"])
+                deleted += 1
+            except OSError:
+                pass
+    return {"deleted_clips": deleted}
+
+
+@router.get("/events/{event_id}/clip")
+def get_clip(event_id: str, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+    row = db.execute(
+        "SELECT clip_path FROM event_clips WHERE event_id = ?", (event_id,)
+    ).fetchone()
+    if not row or not row["clip_path"]:
+        raise HTTPException(status_code=404, detail="No clip for this event")
+    p = Path(row["clip_path"])
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="Clip file not found on disk")
+    return FileResponse(str(p), media_type="video/mp4", filename=f"clip-{event_id}.mp4")
+
+
+@router.delete("/events/{event_id}/clip")
+def delete_clip(event_id: str, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+    row = db.execute(
+        "SELECT clip_path FROM event_clips WHERE event_id = ?", (event_id,)
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="No clip for this event")
+    db.execute("DELETE FROM event_clips WHERE event_id = ?", (event_id,))
+    db.commit()
+    if row["clip_path"]:
+        try:
+            os.remove(row["clip_path"])
+        except OSError:
+            pass
     return {"deleted": event_id}
 
 

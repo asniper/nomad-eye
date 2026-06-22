@@ -10,6 +10,28 @@ INTERNAL_IMAGES_DIR = "/home/arduino/nomadeye-data/images"
 STORAGE_HELPER = "/opt/nomad-eye/storage-helper.sh"
 
 
+def get_active_clips_dir() -> str | None:
+    """Returns clips dir on the primary external storage, or None if unavailable.
+    Clips are external-only — internal storage is too small for video."""
+    try:
+        db = sqlite3.connect(cfg.db_path)
+        row = db.execute("SELECT value FROM app_config WHERE key='storage_primary_device'").fetchone()
+        db.close()
+    except Exception:
+        row = None
+
+    if row and row[0]:
+        mp = _get_mount_point(row[0])
+        if mp:
+            try:
+                clips_path = Path(mp) / "nomadeye" / "clips"
+                clips_path.mkdir(parents=True, exist_ok=True)
+                return str(clips_path)
+            except Exception:
+                pass
+    return None
+
+
 def get_active_images_dir() -> str:
     try:
         db = sqlite3.connect(cfg.db_path)

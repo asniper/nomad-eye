@@ -90,6 +90,13 @@ def init_db():
             scheduled_for TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS event_clips (
+            event_id TEXT PRIMARY KEY,
+            clip_path TEXT NOT NULL,
+            camera_id INTEGER,
+            created_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS notification_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp TEXT NOT NULL,
@@ -174,6 +181,11 @@ def init_db():
         ('category_enabled_faces',   '0'),
         ('update_channel',           'releases'),
         ('auto_update_enabled',      '0'),
+        ('clips_enabled',            '0'),
+        ('clips_pre_roll',           '5'),
+        ('clips_post_roll',          '10'),
+        ('clips_purge_mode',         'pct'),
+        ('clips_purge_threshold',    '90'),
     ]
     for key, value in defaults:
         db.execute(

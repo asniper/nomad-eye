@@ -35,6 +35,10 @@ export const detections = {
   storage: () => api.get('/detections/storage'),
   purge: (category, images_only) => api.delete('/detections/purge', { data: { category, images_only } }),
   deleteEvent: (event_id) => api.delete(`/detections/events/${event_id}`),
+  clip: (event_id) => api.get(`/detections/events/${event_id}/clip`, { responseType: 'blob' }),
+  deleteClip: (event_id) => api.delete(`/detections/events/${event_id}/clip`),
+  clipsStorage: () => api.get('/detections/clips/storage'),
+  purgeClips: () => api.delete('/detections/clips'),
 }
 
 export const notifications = {

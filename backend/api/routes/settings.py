@@ -99,6 +99,15 @@ async def set_setting(body: ConfigItem, db: sqlite3.Connection = Depends(get_db)
     elif body.key.startswith('category_enabled_') and _pipeline is not None:
         category = body.key[len('category_enabled_'):]
         _pipeline.set_category_enabled(category, body.value != '0')
+    elif body.key in ('clips_enabled', 'clips_pre_roll', 'clips_post_roll') and _pipeline is not None:
+        enabled_row = db.execute("SELECT value FROM app_config WHERE key='clips_enabled'").fetchone()
+        pre_row = db.execute("SELECT value FROM app_config WHERE key='clips_pre_roll'").fetchone()
+        post_row = db.execute("SELECT value FROM app_config WHERE key='clips_post_roll'").fetchone()
+        _pipeline.set_clips_config(
+            enabled=(enabled_row['value'] if enabled_row else '0') != '0',
+            pre_roll=int(pre_row['value']) if pre_row else 5,
+            post_roll=int(post_row['value']) if post_row else 10,
+        )
     elif body.key == 'timezone':
         _apply_system_timezone(body.value)
     elif body.key == 'ai_enabled' and _pipeline is not None:

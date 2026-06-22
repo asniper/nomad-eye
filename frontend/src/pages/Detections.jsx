@@ -1,8 +1,15 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import Card from '../components/Card'
-import { detections, cameras } from '../api/client'
+import { detections, cameras, settings as settingsApi } from '../api/client'
 import { formatDateTime, formatTime } from '../utils/dates'
+
+function fmtBytes(b) {
+  if (!b) return '0 B'
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`
+  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`
+  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
 
 const CATEGORY_STYLE = {
   people:   { background: 'rgba(239,68,68,0.15)',   color: '#F87171' },
@@ -62,10 +69,91 @@ function Lightbox({ src, onClose }) {
   )
 }
 
+function ClipPlayer({ eventId, onClose }) {
+  const [src, setSrc] = useState(null)
+  const [error, setError] = useState(false)
+  const urlRef = useRef(null)
+
+  useEffect(() => {
+    let active = true
+    detections.clip(eventId)
+      .then(r => {
+        if (!active) return
+        const url = URL.createObjectURL(r.data)
+        urlRef.current = url
+        setSrc(url)
+      })
+      .catch(() => { if (active) setError(true) })
+    return () => {
+      active = false
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current)
+    }
+  }, [eventId])
+
+  const handleDownload = () => {
+    if (!src) return
+    const a = document.createElement('a')
+    a.href = src
+    a.download = `clip-${eventId}.mp4`
+    a.click()
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        {error ? (
+          <div className="h-48 flex items-center justify-center rounded-lg bg-[#1A1A1A] border border-[#3A3A3A]">
+            <p className="text-sm text-red-400">Clip not available</p>
+          </div>
+        ) : !src ? (
+          <div className="h-48 flex items-center justify-center rounded-lg bg-[#1A1A1A] border border-[#3A3A3A]">
+            <p className="text-sm text-gray-500">Loading clip…</p>
+          </div>
+        ) : (
+          <video
+            src={src}
+            controls
+            autoPlay
+            className="w-full rounded-lg"
+            style={{ maxHeight: '70vh', background: '#000' }}
+          />
+        )}
+        <div className="flex justify-end gap-2 mt-2">
+          {src && (
+            <button
+              onClick={handleDownload}
+              className="px-3 py-1.5 text-xs rounded-md transition-colors hover:opacity-80"
+              style={{ background: '#3A3A3A', color: '#9CA3AF' }}
+            >
+              Download
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs rounded-md transition-colors hover:opacity-80"
+            style={{ background: '#3A3A3A', color: '#9CA3AF' }}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function EventRow({ ev, cameraNames, onDelete }) {
   const [expanded, setExpanded] = useState(false)
   const [lightbox, setLightbox] = useState(null)
+  const [clipOpen, setClipOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [deletingClip, setDeletingClip] = useState(false)
+  const [hasClip, setHasClip] = useState(ev.has_clip === 1)
   const ids = ev.detection_ids || []
   const previewIds = ids.slice(0, 4)
   const hasMore = ids.length > 4
@@ -82,6 +170,7 @@ function EventRow({ ev, cameraNames, onDelete }) {
   return (
     <>
       {lightbox && <Lightbox src={lightbox} onClose={() => setLightbox(null)} />}
+      {clipOpen && <ClipPlayer eventId={ev.event_id} onClose={() => setClipOpen(false)} />}
       <div className="py-3 border-b border-[#3A3A3A] last:border-0">
         <div className="flex flex-col sm:flex-row items-start gap-2 sm:gap-3">
           {/* Thumbnail strip */}
@@ -111,11 +200,35 @@ function EventRow({ ev, cameraNames, onDelete }) {
               <span className="text-xs text-gray-600">{ids.length} screenshot{ids.length !== 1 ? 's' : ''}</span>
               {durationLabel && <span className="text-xs text-gray-600">{durationLabel}</span>}
             </div>
-            <div className="flex items-center gap-3 mt-1">
+            <div className="flex items-center gap-3 mt-1 flex-wrap">
               <p className="text-xs text-gray-500">{formatDateTime(ev.first_seen)}</p>
               <Link to={`/events/${ev.event_id}`} className="text-xs font-medium hover:underline" style={{ color: '#FFB800' }}>
                 View event →
               </Link>
+              {hasClip && (
+                <button
+                  onClick={() => setClipOpen(true)}
+                  className="text-xs font-medium hover:opacity-80 transition-opacity"
+                  style={{ color: '#60A5FA' }}
+                >
+                  ▶ Clip
+                </button>
+              )}
+              {hasClip && (
+                <button
+                  disabled={deletingClip}
+                  onClick={() => {
+                    setDeletingClip(true)
+                    detections.deleteClip(ev.event_id)
+                      .then(() => setHasClip(false))
+                      .catch(() => {})
+                      .finally(() => setDeletingClip(false))
+                  }}
+                  className="text-xs text-gray-500 hover:text-gray-300 disabled:opacity-40 transition-colors"
+                >
+                  {deletingClip ? '…' : 'Del clip'}
+                </button>
+              )}
               <button
                 disabled={deleting}
                 onClick={() => {
@@ -162,6 +275,10 @@ export default function Detections() {
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const [clipsEnabled, setClipsEnabled] = useState(false)
+  const [clipStorage, setClipStorage] = useState(null)
+  const [purgingClips, setPurgingClips] = useState(false)
+  const [purgeClipConfirm, setPurgeClipConfirm] = useState(false)
 
   const load = useCallback((p) => {
     setLoading(true)
@@ -183,13 +300,54 @@ export default function Detections() {
       r.data.forEach(c => { names[c.id] = c.name || `Camera ${c.id}` })
       setCameraNames(names)
     }).catch(() => {})
+    settingsApi.getAll().then(r => {
+      setClipsEnabled(r.data?.clips_enabled === '1')
+    }).catch(() => {})
+    detections.clipsStorage().then(r => setClipStorage(r.data)).catch(() => {})
   }, [])
+
+  const handlePurgeClips = async () => {
+    if (!purgeClipConfirm) { setPurgeClipConfirm(true); return }
+    setPurgingClips(true)
+    setPurgeClipConfirm(false)
+    try {
+      await detections.purgeClips()
+      detections.clipsStorage().then(r => setClipStorage(r.data)).catch(() => {})
+      setEvents(prev => prev.map(e => ({ ...e, has_clip: 0 })))
+    } catch {}
+    setPurgingClips(false)
+  }
 
   const changeFilter = (setter) => (val) => { setter(val); setPage(1) }
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold" style={{ color: '#FFB800' }}>Detection Events</h2>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h2 className="text-2xl font-bold" style={{ color: '#FFB800' }}>Detection Events</h2>
+        {clipsEnabled && clipStorage && clipStorage.clip_count > 0 && (
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-500">
+              {clipStorage.clip_count} clip{clipStorage.clip_count !== 1 ? 's' : ''} · {fmtBytes(clipStorage.clip_bytes)}
+            </span>
+            <button
+              onClick={handlePurgeClips}
+              disabled={purgingClips}
+              className="px-3 py-1 text-xs rounded-md transition-colors disabled:opacity-50"
+              style={purgeClipConfirm
+                ? { background: '#EF4444', color: '#fff' }
+                : { background: '#3A3A3A', color: '#9CA3AF' }
+              }
+            >
+              {purgingClips ? 'Purging…' : purgeClipConfirm ? 'Confirm purge all clips?' : 'Purge clips'}
+            </button>
+            {purgeClipConfirm && (
+              <button onClick={() => setPurgeClipConfirm(false)} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+                Cancel
+              </button>
+            )}
+          </div>
+        )}
+      </div>
 
       <Card>
         <div className="flex flex-wrap gap-4 items-end">

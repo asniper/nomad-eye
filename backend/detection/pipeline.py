@@ -13,8 +13,10 @@ from detection.detector import ObjectDetector, CATEGORY_COLORS_BGR, create_detec
 from detection.face_recognizer import FaceRecognizer
 from notifications.dispatcher import dispatch_notification
 from config.settings import get_settings
-from storage.manager import get_active_images_dir
+from storage.manager import get_active_images_dir, get_active_clips_dir
+from detection.clip_writer import ClipBuffer, EventClipWriter, CLIP_PUSH_INTERVAL
 import sqlite3
+import shutil as _shutil
 
 cfg = get_settings()
 
@@ -142,6 +144,14 @@ class DetectionPipeline:
         self._video_width: int = 1280
         self._video_height: int = 720
         self._video_fps: int = 15
+        # Clip recording
+        self._clips_enabled: bool = False
+        self._clip_pre_roll: int = 5
+        self._clip_post_roll: int = 10
+        self._clip_buffers: dict = {}      # camera_id -> ClipBuffer
+        self._clip_writers: dict = {}      # camera_id -> {event_id -> EventClipWriter}
+        self._clip_lock = threading.Lock()
+        self._last_clip_push: dict = {}    # camera_id -> float
 
     def start(self):
         self._running = True
@@ -149,6 +159,7 @@ class DetectionPipeline:
             t = threading.Thread(target=self._run_camera, args=(cam,), daemon=True)
             t.start()
             self._threads.append(t)
+        threading.Thread(target=self._clip_closer_loop, daemon=True, name='clip-closer').start()
 
     def stop(self):
         self._running = False
@@ -167,6 +178,7 @@ class DetectionPipeline:
                 self._latest_detections.pop(c.camera_id, None)
                 self._overlay_enabled.pop(c.camera_id, None)
                 self._active_events.pop(c.camera_id, None)
+                self._cleanup_camera_clips(c.camera_id)
             existing_paths = {cam.device_path for cam in self._cameras}
             next_id = max((c.camera_id for c in self._cameras), default=-1) + 1
         return existing_paths, next_id
@@ -214,6 +226,131 @@ class DetectionPipeline:
         if not self._ai_enabled:
             self._reload_all_cameras_bg()
 
+    def set_clips_config(self, enabled: bool, pre_roll: int, post_roll: int):
+        was_enabled = self._clips_enabled
+        self._clips_enabled = enabled
+        self._clip_pre_roll = pre_roll
+        self._clip_post_roll = post_roll
+        if was_enabled and not enabled:
+            # Drop all in-progress clips — they won't be completed
+            with self._clip_lock:
+                all_writers = {cid: dict(ws) for cid, ws in self._clip_writers.items()}
+                self._clip_writers.clear()
+            for writers in all_writers.values():
+                for w in writers.values():
+                    try:
+                        path = w.close()
+                        if path:
+                            Path(path).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+            self._clip_buffers.clear()
+            self._last_clip_push.clear()
+
+    def _cleanup_camera_clips(self, camera_id: int):
+        """Drop ring buffer and any in-progress writers for this camera."""
+        self._clip_buffers.pop(camera_id, None)
+        self._last_clip_push.pop(camera_id, None)
+        with self._clip_lock:
+            cam_writers = self._clip_writers.pop(camera_id, {})
+        for w in cam_writers.values():
+            try:
+                w.close()
+            except Exception:
+                pass
+
+    def _clip_closer_loop(self):
+        while self._running:
+            time.sleep(1.0)
+            if self._clips_enabled:
+                try:
+                    self._close_finished_clips()
+                except Exception:
+                    pass
+
+    def _close_finished_clips(self):
+        to_close = []
+        with self._clip_lock:
+            for cam_id, writers in list(self._clip_writers.items()):
+                for event_id, w in list(writers.items()):
+                    if w.should_close(self._clip_post_roll):
+                        to_close.append((cam_id, event_id, w))
+        for cam_id, event_id, w in to_close:
+            clip_path = w.close()
+            with self._clip_lock:
+                if cam_id in self._clip_writers:
+                    self._clip_writers[cam_id].pop(event_id, None)
+            if clip_path:
+                threading.Thread(
+                    target=self._save_clip,
+                    args=(event_id, cam_id, clip_path),
+                    daemon=True
+                ).start()
+
+    def _save_clip(self, event_id: str, camera_id: int, clip_path: str):
+        self._store_clip_record(event_id, camera_id, clip_path)
+        try:
+            self._auto_purge_clips()
+        except Exception:
+            pass
+
+    def _store_clip_record(self, event_id: str, camera_id: int, clip_path: str):
+        from datetime import datetime, timezone
+        db = sqlite3.connect(cfg.db_path)
+        try:
+            ts = datetime.now(timezone.utc).isoformat()
+            db.execute(
+                "INSERT OR REPLACE INTO event_clips (event_id, clip_path, camera_id, created_at)"
+                " VALUES (?,?,?,?)",
+                (event_id, clip_path, camera_id, ts),
+            )
+            db.commit()
+        finally:
+            db.close()
+
+    def _auto_purge_clips(self):
+        """Delete oldest clips when storage threshold is exceeded."""
+        db = sqlite3.connect(cfg.db_path)
+        try:
+            mode_row = db.execute("SELECT value FROM app_config WHERE key='clips_purge_mode'").fetchone()
+            purge_mode = mode_row[0] if mode_row else 'pct'
+            thr_row = db.execute("SELECT value FROM app_config WHERE key='clips_purge_threshold'").fetchone()
+            threshold = float(thr_row[0]) if thr_row else 90.0
+
+            clips_dir = get_active_clips_dir()
+            if not clips_dir:
+                return
+
+            def _over():
+                if purge_mode == 'pct':
+                    try:
+                        u = _shutil.disk_usage(clips_dir)
+                        return (u.used / u.total * 100) > threshold
+                    except Exception:
+                        return False
+                else:
+                    rows = db.execute("SELECT clip_path FROM event_clips").fetchall()
+                    total = sum(Path(r[0]).stat().st_size for r in rows if r[0] and Path(r[0]).exists())
+                    return total > threshold * 1024 * 1024
+
+            if not _over():
+                return
+            rows = db.execute(
+                "SELECT event_id, clip_path FROM event_clips ORDER BY created_at ASC"
+            ).fetchall()
+            for event_id, clip_path in rows:
+                if clip_path:
+                    try:
+                        Path(clip_path).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                db.execute("DELETE FROM event_clips WHERE event_id=?", (event_id,))
+                db.commit()
+                if not _over():
+                    break
+        finally:
+            db.close()
+
     def _reload_all_cameras_bg(self):
         """Reload all cameras in a background thread so the caller is never blocked."""
         cam_ids = [c.camera_id for c in list(self._cameras)]
@@ -260,6 +397,7 @@ class DetectionPipeline:
         self._auto_resets.pop(camera_id, None)
         self._yolo_timeouts.pop(camera_id, None)
         self._debug_stats.pop(camera_id, None)
+        self._cleanup_camera_clips(camera_id)
 
     def disable_camera(self, camera_id: int):
         """Stop and remove a camera from the active pipeline without deleting its DB record."""
@@ -281,6 +419,7 @@ class DetectionPipeline:
         self._debug_stats.pop(camera_id, None)
         self._face_last_run.pop(camera_id, None)
         self._face_crop_last_run.pop(camera_id, None)
+        self._cleanup_camera_clips(camera_id)
 
     def enable_camera(self, camera_id: int, device_index: int, usb_id: str = '') -> bool:
         """Start a previously disabled camera and add it to the pipeline."""
@@ -328,6 +467,7 @@ class DetectionPipeline:
         self._auto_resets.pop(camera_id, None)
         self._yolo_timeouts.pop(camera_id, None)
         self._debug_stats.pop(camera_id, None)
+        self._cleanup_camera_clips(camera_id)
 
         time.sleep(1.0)  # Give OS time to release the device
 
@@ -359,6 +499,7 @@ class DetectionPipeline:
                 self._latest_detections.pop(c.camera_id, None)
                 self._overlay_enabled.pop(c.camera_id, None)
                 self._active_events.pop(c.camera_id, None)
+                self._cleanup_camera_clips(c.camera_id)
 
             # Add newly found cameras
             for cap in new_captures:
@@ -411,6 +552,20 @@ class DetectionPipeline:
             frame = frame_obj.data
             has_motion, motion_mask = motion_detector.detect(frame)
             now = time.time()
+
+            # --- CLIP RING BUFFER & LIVE EXTENSION ---
+            if self._clips_enabled:
+                last_push = self._last_clip_push.get(cam.camera_id, 0)
+                if now - last_push >= CLIP_PUSH_INTERVAL:
+                    if cam.camera_id not in self._clip_buffers:
+                        self._clip_buffers[cam.camera_id] = ClipBuffer(self._clip_pre_roll)
+                    self._clip_buffers[cam.camera_id].push(frame)
+                    self._last_clip_push[cam.camera_id] = now
+                    with self._clip_lock:
+                        cam_writers = dict(self._clip_writers.get(cam.camera_id, {}))
+                    for w in cam_writers.values():
+                        w.extend(frame)
+            # ---
 
             if has_motion:
                 if cam.camera_id not in self._motion_start:
@@ -622,6 +777,27 @@ class DetectionPipeline:
                     'notified': False,
                 }
                 active.append(ev)
+                # Create clip writer asynchronously to avoid blocking the camera loop
+                if self._clips_enabled:
+                    clips_dir = get_active_clips_dir()
+                    if clips_dir:
+                        buf = self._clip_buffers.get(cam.camera_id)
+                        pre_roll = buf.snapshot() if buf else []
+                        clip_path = str(
+                            Path(clips_dir) / f'cam{cam.camera_id}_{ev["event_id"]}.mp4'
+                        )
+                        _eid = ev['event_id']
+                        _cid = cam.camera_id
+                        def _mk_writer(eid=_eid, cp=clip_path, pr=pre_roll, cid=_cid):
+                            try:
+                                w = EventClipWriter(cp, pr, camera_id=cid)
+                                with self._clip_lock:
+                                    if cid not in self._clip_writers:
+                                        self._clip_writers[cid] = {}
+                                    self._clip_writers[cid][eid] = w
+                            except Exception:
+                                pass
+                        threading.Thread(target=_mk_writer, daemon=True).start()
             else:
                 ev['bbox'] = d.bbox
                 ev['last_seen'] = now

@@ -74,6 +74,9 @@ async def lifespan(app: FastAPI):
     motion_row = db.execute("SELECT value FROM app_config WHERE key='motion_threshold'").fetchone()
     initial_motion_threshold = int(motion_row[0]) if motion_row else None
     classes_row = db.execute("SELECT value FROM app_config WHERE key='detection_classes'").fetchone()
+    clips_enabled_row = db.execute("SELECT value FROM app_config WHERE key='clips_enabled'").fetchone()
+    clips_pre_roll_row = db.execute("SELECT value FROM app_config WHERE key='clips_pre_roll'").fetchone()
+    clips_post_roll_row = db.execute("SELECT value FROM app_config WHERE key='clips_post_roll'").fetchone()
     db.close()
 
     from api.routes.settings import _parse_classes
@@ -111,6 +114,11 @@ async def lifespan(app: FastAPI):
     except (ValueError, KeyError):
         pass
     pipeline.start()
+    pipeline.set_clips_config(
+        enabled=(clips_enabled_row[0] if clips_enabled_row else '0') != '0',
+        pre_roll=int(clips_pre_roll_row[0]) if clips_pre_roll_row else 5,
+        post_roll=int(clips_post_roll_row[0]) if clips_post_roll_row else 10,
+    )
     cam_router.set_pipeline(pipeline)
     settings.set_pipeline(pipeline)
     faces_router.set_pipeline(pipeline)

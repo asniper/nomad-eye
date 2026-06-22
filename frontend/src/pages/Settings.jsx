@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import { settings, detections as detectionsApi, storage as storageApi, system as systemApi, cameras as camerasApi, faces as facesApi } from '../api/client'
+
 import { useAuth } from '../hooks/useAuth'
 import { useDeviceStatus } from '../context/DeviceStatusContext'
 import { setTimezone } from '../utils/dates'
@@ -990,7 +991,206 @@ function StorageTab() {
       <StorageLocationCard />
       <ExternalDevicesCard />
       <StorageCard />
+      <VideoClipsCard />
     </div>
+  )
+}
+
+function VideoClipsCard() {
+  const [s, setS] = useState(null)
+  const [clipStorage, setClipStorage] = useState(null)
+  const [saving, setSaving] = useState({})
+  const [saved, setSaved] = useState({})
+  const [purging, setPurging] = useState(false)
+  const [purgeConfirm, setPurgeConfirm] = useState(false)
+  const [purgeResult, setPurgeResult] = useState(null)
+
+  const load = useCallback(() => {
+    settings.getAll().then(r => setS(r.data)).catch(() => {})
+    detectionsApi.clipsStorage().then(r => setClipStorage(r.data)).catch(() => {})
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const save = async (key, value) => {
+    setSaving(p => ({ ...p, [key]: true }))
+    try {
+      await settings.set(key, value)
+      setS(p => ({ ...p, [key]: String(value) }))
+      setSaved(p => ({ ...p, [key]: true }))
+      setTimeout(() => setSaved(p => ({ ...p, [key]: false })), 2000)
+    } catch {}
+    setSaving(p => ({ ...p, [key]: false }))
+  }
+
+  const handlePurgeClips = async () => {
+    if (!purgeConfirm) { setPurgeConfirm(true); return }
+    setPurging(true)
+    setPurgeConfirm(false)
+    setPurgeResult(null)
+    try {
+      const r = await detectionsApi.purgeClips()
+      setPurgeResult(r.data.deleted_clips)
+      load()
+    } catch {}
+    setPurging(false)
+  }
+
+  if (!s) return null
+
+  const clipsEnabled = s.clips_enabled === '1'
+  const preRoll = s.clips_pre_roll ?? '5'
+  const postRoll = s.clips_post_roll ?? '10'
+  const purgeMode = s.clips_purge_mode ?? 'pct'
+  const threshold = s.clips_purge_threshold ?? '90'
+
+  return (
+    <Card title="Video Clips">
+      <p className="text-xs text-gray-500 mb-4">
+        Records MP4 clips of detection events. Requires an external USB drive — clips are never saved to internal storage.
+      </p>
+
+      {/* Enable toggle */}
+      <div className="flex items-center justify-between py-3 border-b border-[#3A3A3A]">
+        <div>
+          <p className="text-sm font-medium text-white">Enable clip recording</p>
+          <p className="text-xs text-gray-500 mt-0.5">Records a 640×360 MP4 with pre-roll for each detection event</p>
+        </div>
+        <button
+          onClick={() => save('clips_enabled', clipsEnabled ? '0' : '1')}
+          className="relative w-11 h-6 rounded-full transition-colors shrink-0"
+          style={{ background: clipsEnabled ? '#FFB800' : '#3A3A3A' }}
+        >
+          <span
+            className="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all"
+            style={{ left: clipsEnabled ? '1.375rem' : '0.25rem' }}
+          />
+        </button>
+      </div>
+
+      <div className={clipsEnabled ? '' : 'opacity-40 pointer-events-none select-none'}>
+        {/* Pre-roll */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 py-3 border-b border-[#3A3A3A]">
+          <div className="sm:w-40 shrink-0">
+            <p className="text-sm font-medium text-white">Pre-roll</p>
+            <p className="text-xs text-gray-500 mt-0.5">Seconds of footage before the event</p>
+          </div>
+          <div className="flex gap-1.5 flex-wrap">
+            {['3', '5', '10', '15'].map(v => (
+              <button key={v}
+                onClick={() => save('clips_pre_roll', v)}
+                className="px-3 py-1 rounded-md text-xs font-medium transition-opacity hover:opacity-80"
+                style={preRoll === v ? { background: '#FFB800', color: '#151925' } : { background: '#3A3A3A', color: '#9CA3AF' }}
+              >{v}s</button>
+            ))}
+            {saved.clips_pre_roll && <span className="text-xs text-green-400 self-center">Saved ✓</span>}
+          </div>
+        </div>
+
+        {/* Post-roll */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 py-3 border-b border-[#3A3A3A]">
+          <div className="sm:w-40 shrink-0">
+            <p className="text-sm font-medium text-white">Post-roll</p>
+            <p className="text-xs text-gray-500 mt-0.5">Seconds to keep recording after detection ends</p>
+          </div>
+          <div className="flex gap-1.5 flex-wrap">
+            {['5', '10', '15', '30'].map(v => (
+              <button key={v}
+                onClick={() => save('clips_post_roll', v)}
+                className="px-3 py-1 rounded-md text-xs font-medium transition-opacity hover:opacity-80"
+                style={postRoll === v ? { background: '#FFB800', color: '#151925' } : { background: '#3A3A3A', color: '#9CA3AF' }}
+              >{v}s</button>
+            ))}
+            {saved.clips_post_roll && <span className="text-xs text-green-400 self-center">Saved ✓</span>}
+          </div>
+        </div>
+
+        {/* Auto-purge mode */}
+        <div className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-6 py-3 border-b border-[#3A3A3A]">
+          <div className="sm:w-40 shrink-0">
+            <p className="text-sm font-medium text-white">Auto-purge</p>
+            <p className="text-xs text-gray-500 mt-0.5">Oldest clips deleted when threshold exceeded</p>
+          </div>
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              {[
+                { id: 'pct', label: 'Disk usage %' },
+                { id: 'mb', label: 'Clip storage MB' },
+              ].map(m => (
+                <button key={m.id}
+                  onClick={() => save('clips_purge_mode', m.id)}
+                  className="px-3 py-1 rounded-md text-xs font-medium transition-opacity hover:opacity-80"
+                  style={purgeMode === m.id ? { background: '#FFB800', color: '#151925' } : { background: '#3A3A3A', color: '#9CA3AF' }}
+                >{m.label}</button>
+              ))}
+              {saved.clips_purge_mode && <span className="text-xs text-green-400 self-center">Saved ✓</span>}
+            </div>
+            {purgeMode === 'pct' ? (
+              <div className="flex gap-1.5 flex-wrap">
+                <span className="text-xs text-gray-500 self-center">Purge when disk &gt;</span>
+                {['70', '80', '90', '95'].map(v => (
+                  <button key={v}
+                    onClick={() => save('clips_purge_threshold', v)}
+                    className="px-3 py-1 rounded-md text-xs font-medium transition-opacity hover:opacity-80"
+                    style={threshold === v ? { background: '#FFB800', color: '#151925' } : { background: '#3A3A3A', color: '#9CA3AF' }}
+                  >{v}%</button>
+                ))}
+                {saved.clips_purge_threshold && <span className="text-xs text-green-400 self-center">Saved ✓</span>}
+              </div>
+            ) : (
+              <div className="flex gap-1.5 flex-wrap">
+                <span className="text-xs text-gray-500 self-center">Purge when clips exceed</span>
+                {[
+                  { label: '500 MB', value: '500' },
+                  { label: '1 GB', value: '1024' },
+                  { label: '5 GB', value: '5120' },
+                  { label: '10 GB', value: '10240' },
+                ].map(o => (
+                  <button key={o.value}
+                    onClick={() => save('clips_purge_threshold', o.value)}
+                    className="px-3 py-1 rounded-md text-xs font-medium transition-opacity hover:opacity-80"
+                    style={threshold === o.value ? { background: '#FFB800', color: '#151925' } : { background: '#3A3A3A', color: '#9CA3AF' }}
+                  >{o.label}</button>
+                ))}
+                {saved.clips_purge_threshold && <span className="text-xs text-green-400 self-center">Saved ✓</span>}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Clip storage stats + manual purge */}
+        <div className="pt-3">
+          {clipStorage && (
+            <p className="text-xs text-gray-500 mb-3">
+              {clipStorage.clip_count} clip{clipStorage.clip_count !== 1 ? 's' : ''} stored
+              {clipStorage.clip_bytes > 0 ? ` · ${fmtBytes(clipStorage.clip_bytes)}` : ''}
+              {clipStorage.clips_dir ? ` · ${clipStorage.clips_dir}` : ' · no external drive mounted'}
+            </p>
+          )}
+          {purgeResult !== null && (
+            <p className="text-xs text-green-400 mb-2">{purgeResult} clip{purgeResult !== 1 ? 's' : ''} deleted.</p>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handlePurgeClips}
+              disabled={purging || (clipStorage && clipStorage.clip_count === 0)}
+              className="px-4 py-1.5 rounded-md text-sm font-medium transition-colors disabled:opacity-50"
+              style={purgeConfirm
+                ? { background: '#EF4444', color: '#fff' }
+                : { background: '#3A3A3A', color: '#fff' }
+              }
+            >
+              {purging ? 'Purging…' : purgeConfirm ? 'Confirm — delete all clips?' : 'Purge all clips'}
+            </button>
+            {purgeConfirm && (
+              <button onClick={() => setPurgeConfirm(false)} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </Card>
   )
 }
 
