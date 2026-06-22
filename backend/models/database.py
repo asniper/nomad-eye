@@ -194,15 +194,6 @@ def init_db():
         )
     db.commit()
 
-    # Migrate update_channel from 'releases' to 'main' — we don't publish release tags
-    try:
-        db.execute(
-            "UPDATE app_config SET value='main' WHERE key='update_channel' AND value='releases'"
-        )
-        db.commit()
-    except Exception:
-        pass
-
     # Migrate camera names from app_config into cameras.name (one-time, safe to re-run)
     try:
         db.execute("""
