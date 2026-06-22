@@ -111,7 +111,10 @@ def perform_update(channel: str):
             subprocess.run(['git', '-C', PROJECT_PATH, 'fetch', '--tags'], check=True, timeout=60)
             subprocess.run(['git', '-C', PROJECT_PATH, 'checkout', tag], check=True, timeout=30)
         subprocess.run(
-            ['bash', '-c', f'cd {PROJECT_PATH}/frontend && npm install --prefer-offline && npm run build'],
+            ['bash', '-c',
+             f'cd {PROJECT_PATH}/frontend && '
+             f'(test -d node_modules || npm install) && '
+             f'npm run build'],
             check=True, timeout=300, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         _update_status = {"in_progress": False, "last_result": "success"}
