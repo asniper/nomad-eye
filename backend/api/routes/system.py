@@ -132,15 +132,13 @@ def perform_update(channel: str):
 
 def start_auto_update_scheduler():
     def _loop():
+        # Initial delay so the service is fully up before the first check
+        time.sleep(60)
         while True:
-            now = time.localtime()
-            secs_until_3am = ((3 - now.tm_hour) % 24) * 3600 - now.tm_min * 60 - now.tm_sec
-            if secs_until_3am <= 0:
-                secs_until_3am += 86400
-            time.sleep(secs_until_3am)
             if _db_get('auto_update_enabled', '0') == '1':
-                channel = _db_get('update_channel', 'releases')
+                channel = _db_get('update_channel', 'main')
                 perform_update(channel)
+            time.sleep(3600)
 
     t = threading.Thread(target=_loop, daemon=True, name='auto-update-scheduler')
     t.start()

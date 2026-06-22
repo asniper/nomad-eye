@@ -179,7 +179,7 @@ def init_db():
         ('category_enabled_animals', '1'),
         ('category_enabled_other',   '1'),
         ('category_enabled_faces',   '0'),
-        ('update_channel',           'releases'),
+        ('update_channel',           'main'),
         ('auto_update_enabled',      '0'),
         ('clips_enabled',            '0'),
         ('clips_pre_roll',           '5'),
@@ -193,6 +193,15 @@ def init_db():
             (key, value)
         )
     db.commit()
+
+    # Migrate update_channel from 'releases' to 'main' — we don't publish release tags
+    try:
+        db.execute(
+            "UPDATE app_config SET value='main' WHERE key='update_channel' AND value='releases'"
+        )
+        db.commit()
+    except Exception:
+        pass
 
     # Migrate camera names from app_config into cameras.name (one-time, safe to re-run)
     try:
