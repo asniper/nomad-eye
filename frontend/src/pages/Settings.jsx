@@ -73,6 +73,7 @@ function SettingRow({ label, hint, children }) {
 
 const TABS = [
   { id: 'general', label: 'General' },
+  { id: 'detection', label: 'Detection' },
   { id: 'faces', label: 'Faces' },
   { id: 'network', label: 'Network' },
   { id: 'storage', label: 'Storage' },
@@ -147,9 +148,81 @@ export default function Settings() {
       {tab === 'storage' && <StorageTab />}
       {tab === 'system' && <SystemTab allSettings={allSettings} saveSetting={saveSetting} saving={saving} saved={saved} />}
       {tab === 'faces' && <FacesTab />}
+      {tab === 'detection' && <>
+        <Card title="Detection">
+          {/* AI enabled toggle */}
+          <div className="flex items-center justify-between py-3 mb-2 border-b border-[#3A3A3A]">
+            <div>
+              <p className="text-sm font-medium text-white">AI Detection</p>
+              <p className="text-xs text-gray-500 mt-0.5">Enable or disable all AI-based object and face detection.</p>
+            </div>
+            <button
+              onClick={() => saveSetting('ai_enabled', (allSettings.ai_enabled ?? '1') === '0' ? '1' : '0')}
+              className="relative w-11 h-6 rounded-full transition-colors shrink-0"
+              style={{ background: (allSettings.ai_enabled ?? '1') !== '0' ? '#FFB800' : '#3A3A3A' }}
+            >
+              <span
+                className="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all"
+                style={{ left: (allSettings.ai_enabled ?? '1') !== '0' ? '1.375rem' : '0.25rem' }}
+              />
+            </button>
+          </div>
+          <div className={(allSettings.ai_enabled ?? '1') === '0' ? 'opacity-40 pointer-events-none select-none' : ''}>
+          <SettingRow label="Detection Model" hint="The AI model used to classify detected motion. Switching downloads and loads the new model — may take a minute.">
+            <ModelSelector allSettings={allSettings} onSave={saveSetting} saving={saving} saved={saved} errors={errors} />
+          </SettingRow>
+          <SettingRow label="Confidence thresholds" hint="Per-category minimum confidence. Higher = fewer false positives.">
+            <ConfidenceSliders allSettings={allSettings} onSave={saveSetting} saving={saving} saved={saved} />
+          </SettingRow>
+          <SettingRow label="Motion threshold" hint="Pixel area. Higher = less sensitive to small motion.">
+            <NumberInput
+              keyName="motion_threshold"
+              current={allSettings.motion_threshold ?? 100}
+              min={100} max={5000} step={100}
+              onSave={saveSetting}
+              saving={saving.motion_threshold}
+              saved={saved.motion_threshold}
+            />
+          </SettingRow>
+          <SettingRow label="Motion detection scale" hint="Resolution used for motion detection. Lower = less CPU, slightly less precise.">
+            <div className="flex gap-2 flex-wrap">
+              {[
+                { id: '1.0', label: 'Full', sub: '1280×720' },
+                { id: '0.5', label: 'Half', sub: '640×360' },
+                { id: '0.25', label: 'Quarter', sub: '320×180' },
+              ].map(opt => (
+                <button
+                  key={opt.id}
+                  onClick={() => saveSetting('motion_scale', opt.id)}
+                  disabled={saving.motion_scale}
+                  className="px-3 py-1.5 rounded-md text-sm font-medium transition-opacity hover:opacity-80 disabled:opacity-50"
+                  style={(allSettings.motion_scale ?? '0.5') === opt.id
+                    ? { background: '#FFB800', color: '#151925' }
+                    : { background: '#3A3A3A', color: '#ffffff' }
+                  }
+                >
+                  {opt.label} <span className="text-xs opacity-70">{opt.sub}</span>
+                </button>
+              ))}
+              {saved.motion_scale && <span className="text-xs text-green-400 self-center">Saved ✓</span>}
+            </div>
+          </SettingRow>
+          <SettingRow label="Detection interval" hint="Seconds between AI scans when motion is active. Lower = more responsive, more CPU.">
+            <NumberInput
+              keyName="detection_cooldown"
+              current={parseFloat(allSettings.detection_cooldown ?? 3.0)}
+              min={0.5} max={30} step={0.5}
+              onSave={saveSetting}
+              saving={saving.detection_cooldown}
+              saved={saved.detection_cooldown}
+            />
+          </SettingRow>
+          </div>
+        </Card>
+        <CamerasCard allSettings={allSettings} saveSetting={saveSetting} saving={saving} saved={saved} />
+      </>}
 
       {tab === 'general' && <>
-
       <Card title="Device Status">
         <p className="text-sm text-gray-400 mb-3">
           The current status controls which notification rules are active.
@@ -173,79 +246,6 @@ export default function Settings() {
               )}
             </button>
           ))}
-        </div>
-      </Card>
-
-      <Card title="Detection">
-        {/* AI enabled toggle */}
-        <div className="flex items-center justify-between py-3 mb-2 border-b border-[#3A3A3A]">
-          <div>
-            <p className="text-sm font-medium text-white">AI Detection</p>
-            <p className="text-xs text-gray-500 mt-0.5">Enable or disable all AI-based object and face detection.</p>
-          </div>
-          <button
-            onClick={() => saveSetting('ai_enabled', (allSettings.ai_enabled ?? '1') === '0' ? '1' : '0')}
-            className="relative w-11 h-6 rounded-full transition-colors shrink-0"
-            style={{ background: (allSettings.ai_enabled ?? '1') !== '0' ? '#FFB800' : '#3A3A3A' }}
-          >
-            <span
-              className="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all"
-              style={{ left: (allSettings.ai_enabled ?? '1') !== '0' ? '1.375rem' : '0.25rem' }}
-            />
-          </button>
-        </div>
-
-        {/* All settings below are disabled when AI is off */}
-        <div className={(allSettings.ai_enabled ?? '1') === '0' ? 'opacity-40 pointer-events-none select-none' : ''}>
-        <SettingRow label="Detection Model" hint="The AI model used to classify detected motion. Switching downloads and loads the new model — may take a minute.">
-          <ModelSelector allSettings={allSettings} onSave={saveSetting} saving={saving} saved={saved} errors={errors} />
-        </SettingRow>
-        <SettingRow label="Confidence thresholds" hint="Per-category minimum confidence. Higher = fewer false positives.">
-          <ConfidenceSliders allSettings={allSettings} onSave={saveSetting} saving={saving} saved={saved} />
-        </SettingRow>
-        <SettingRow label="Motion threshold" hint="Pixel area. Higher = less sensitive to small motion.">
-          <NumberInput
-            keyName="motion_threshold"
-            current={allSettings.motion_threshold ?? 100}
-            min={100} max={5000} step={100}
-            onSave={saveSetting}
-            saving={saving.motion_threshold}
-            saved={saved.motion_threshold}
-          />
-        </SettingRow>
-        <SettingRow label="Motion detection scale" hint="Resolution used for motion detection. Lower = less CPU, slightly less precise.">
-          <div className="flex gap-2 flex-wrap">
-            {[
-              { id: '1.0', label: 'Full', sub: '1280×720' },
-              { id: '0.5', label: 'Half', sub: '640×360' },
-              { id: '0.25', label: 'Quarter', sub: '320×180' },
-            ].map(opt => (
-              <button
-                key={opt.id}
-                onClick={() => saveSetting('motion_scale', opt.id)}
-                disabled={saving.motion_scale}
-                className="px-3 py-1.5 rounded-md text-sm font-medium transition-opacity hover:opacity-80 disabled:opacity-50"
-                style={(allSettings.motion_scale ?? '0.5') === opt.id
-                  ? { background: '#FFB800', color: '#151925' }
-                  : { background: '#3A3A3A', color: '#ffffff' }
-                }
-              >
-                {opt.label} <span className="text-xs opacity-70">{opt.sub}</span>
-              </button>
-            ))}
-            {saved.motion_scale && <span className="text-xs text-green-400 self-center">Saved ✓</span>}
-          </div>
-        </SettingRow>
-        <SettingRow label="Detection interval" hint="Seconds between AI scans when motion is active. Lower = more responsive, more CPU.">
-          <NumberInput
-            keyName="detection_cooldown"
-            current={parseFloat(allSettings.detection_cooldown ?? 3.0)}
-            min={0.5} max={30} step={0.5}
-            onSave={saveSetting}
-            saving={saving.detection_cooldown}
-            saved={saved.detection_cooldown}
-          />
-        </SettingRow>
         </div>
       </Card>
 
@@ -302,8 +302,6 @@ export default function Settings() {
           <TextInput keyName="smtp_from" current={allSettings.smtp_from ?? ''} onSave={saveSetting} saving={saving.smtp_from} saved={saved.smtp_from} error={errors.smtp_from} placeholder="nomadeye@example.com" />
         </SettingRow>
       </Card>
-
-      <CamerasCard allSettings={allSettings} saveSetting={saveSetting} saving={saving} saved={saved} />
 
       <Card title="Account">
         <SettingRow label="Sign out" hint="You will be returned to the login screen.">
