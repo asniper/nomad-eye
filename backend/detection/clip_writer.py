@@ -49,11 +49,18 @@ class EventClipWriter:
 
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-        # Try avc1 (H.264 via OpenCV's built-in FFMPEG); fall back to mp4v
-        fourcc = cv2.VideoWriter_fourcc(*'avc1')
-        self._writer = cv2.VideoWriter(output_path, fourcc, CLIP_FPS, (CLIP_WIDTH, CLIP_HEIGHT))
+        # GStreamer openh264enc: software H.264, avoids h264_v4l2m2m conflict with active cameras
+        gst = (f'appsrc ! videoconvert ! openh264enc ! h264parse ! mp4mux '
+               f'! filesink location={output_path}')
+        self._writer = cv2.VideoWriter(gst, cv2.CAP_GSTREAMER, 0, CLIP_FPS, (CLIP_WIDTH, CLIP_HEIGHT), True)
         if not self._writer.isOpened():
             self._writer.release()
+            # Fallback: FFmpeg avc1
+            fourcc = cv2.VideoWriter_fourcc(*'avc1')
+            self._writer = cv2.VideoWriter(output_path, fourcc, CLIP_FPS, (CLIP_WIDTH, CLIP_HEIGHT))
+        if not self._writer.isOpened():
+            self._writer.release()
+            # Last resort: mp4v
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             self._writer = cv2.VideoWriter(output_path, fourcc, CLIP_FPS, (CLIP_WIDTH, CLIP_HEIGHT))
 
