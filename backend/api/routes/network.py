@@ -171,6 +171,50 @@ def tailscale_auth_url(_=Depends(require_auth)):
     raise HTTPException(status_code=500, detail='Could not get auth URL. Tailscale may not be running.')
 
 
+class TailscaleUpRequest(BaseModel):
+    auth_key: str = ""
+
+
+@router.post("/tailscale/up")
+def tailscale_up(body: TailscaleUpRequest, _=Depends(require_auth)):
+    cmd = ['tailscale', 'up', '--accept-routes']
+    if body.auth_key.strip():
+        cmd.append(f'--authkey={body.auth_key.strip()}')
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout or '').strip()
+            if 'already' not in err.lower():
+                raise HTTPException(status_code=500, detail=err or 'Failed to connect')
+        return {"status": "up"}
+    except subprocess.TimeoutExpired:
+        return {"status": "pending"}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail='Tailscale is not installed')
+
+
+@router.post("/tailscale/down")
+def tailscale_down(_=Depends(require_auth)):
+    try:
+        result = subprocess.run(['tailscale', 'down'], capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail=result.stderr.strip() or 'Failed to disconnect')
+        return {"status": "down"}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail='Tailscale is not installed')
+
+
+@router.post("/tailscale/logout")
+def tailscale_logout(_=Depends(require_auth)):
+    try:
+        result = subprocess.run(['tailscale', 'logout'], capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail=result.stderr.strip() or 'Failed to logout')
+        return {"status": "logged_out"}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail='Tailscale is not installed')
+
+
 @router.get("/tailscale")
 def tailscale_status(_=Depends(require_auth)):
     try:

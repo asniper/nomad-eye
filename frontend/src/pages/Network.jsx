@@ -44,6 +44,12 @@ function TailscaleCard() {
   const [authUrl, setAuthUrl] = useState(null)
   const [fetchingAuth, setFetchingAuth] = useState(false)
   const [authError, setAuthError] = useState(null)
+  const [authKey, setAuthKey] = useState('')
+  const [connectingKey, setConnectingKey] = useState(false)
+  const [keyError, setKeyError] = useState(null)
+  const [disconnecting, setDisconnecting] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
+  const [actionError, setActionError] = useState(null)
   const pollRef = useRef(null)
 
   const fetchStatus = useCallback(() =>
@@ -55,13 +61,14 @@ function TailscaleCard() {
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [fetchStatus])
 
-  const startPolling = () => {
+  const startPolling = (onConnect) => {
     if (pollRef.current) clearInterval(pollRef.current)
     pollRef.current = setInterval(async () => {
       const r = await network.tailscale().catch(() => null)
       if (r?.data?.connected) {
         clearInterval(pollRef.current); pollRef.current = null
         setTs(r.data); setAuthUrl(null)
+        if (onConnect) onConnect()
       }
     }, 3000)
   }
@@ -77,6 +84,40 @@ function TailscaleCard() {
     } finally { setFetchingAuth(false) }
   }
 
+  const connectWithKey = async () => {
+    if (!authKey.trim()) return
+    setConnectingKey(true); setKeyError(null)
+    try {
+      await network.tailscaleUp(authKey.trim())
+      setAuthKey('')
+      startPolling(() => setConnectingKey(false))
+    } catch (e) {
+      setKeyError(e?.response?.data?.detail || 'Failed to connect')
+      setConnectingKey(false)
+    }
+  }
+
+  const disconnect = async () => {
+    setDisconnecting(true); setActionError(null)
+    try {
+      await network.tailscaleDown()
+      await fetchStatus()
+    } catch (e) {
+      setActionError(e?.response?.data?.detail || 'Failed to disconnect')
+    } finally { setDisconnecting(false) }
+  }
+
+  const logout = async () => {
+    if (!window.confirm('Log out of Tailscale? You will need to re-authorize this device.')) return
+    setLoggingOut(true); setActionError(null)
+    try {
+      await network.tailscaleLogout()
+      await fetchStatus()
+    } catch (e) {
+      setActionError(e?.response?.data?.detail || 'Failed to logout')
+    } finally { setLoggingOut(false) }
+  }
+
   const accessUrl = ts?.ip ? `http://${ts.ip}` : null
   const viaTs = window.location.hostname.startsWith('100.')
 
@@ -89,6 +130,8 @@ function TailscaleCard() {
     } catch {}
     setSettingUrl(false)
   }
+
+  const inputCls = "flex-1 min-w-0 bg-[#3A3A3A] border border-[#484848] rounded-md px-3 py-1.5 text-sm text-white focus:outline-none font-mono"
 
   return (
     <Card title="Tailscale Remote Access">
@@ -117,32 +160,31 @@ function TailscaleCard() {
             <span className="text-sm text-gray-400">Status</span>
             <Badge label="Not Connected" color="red" />
           </div>
+
+          {/* Browser auth */}
           <div className="pt-2 border-t border-[#2E2E2E] space-y-3">
-            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Connect to your Tailscale account</p>
+            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Connect via browser</p>
             {!authUrl ? (
               <>
-                <p className="text-sm text-gray-400">
-                  Tailscale is installed but not connected. Tap below to link this device to your account.
-                </p>
+                <p className="text-sm text-gray-400">Generates an authorization link you open in any browser.</p>
                 {authError && <p className="text-sm text-red-400">{authError}</p>}
                 <button
                   onClick={getAuthUrl}
-                  disabled={fetchingAuth}
+                  disabled={fetchingAuth || connectingKey}
                   className="px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
                   style={{ background: '#FFB800', color: '#151925' }}
                 >
-                  {fetchingAuth ? 'Generating link…' : 'Connect to Tailscale account'}
+                  {fetchingAuth ? 'Generating link…' : 'Get authorization link'}
                 </button>
               </>
             ) : (
               <>
-                <p className="text-sm text-gray-400">Visit this link to authorize the device (opens in your browser):</p>
+                <p className="text-sm text-gray-400">Open this link in your browser to authorize:</p>
                 <div className="flex items-center gap-2 bg-[#1a1a1a] rounded-md px-3 py-2">
-                  <a
-                    href={authUrl} target="_blank" rel="noreferrer"
-                    className="text-sm font-mono flex-1 break-all hover:underline"
-                    style={{ color: '#FFB800' }}
-                  >{authUrl}</a>
+                  <a href={authUrl} target="_blank" rel="noreferrer"
+                    className="text-sm font-mono flex-1 break-all hover:underline" style={{ color: '#FFB800' }}>
+                    {authUrl}
+                  </a>
                   <CopyButton text={authUrl} />
                 </div>
                 <p className="text-xs text-gray-500 flex items-center gap-1.5">
@@ -150,16 +192,48 @@ function TailscaleCard() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                   </svg>
-                  Waiting for authorization — this page will update automatically.
+                  Waiting for authorization — page updates automatically.
                 </p>
               </>
             )}
+          </div>
+
+          {/* Auth key */}
+          <div className="pt-2 border-t border-[#2E2E2E] space-y-3">
+            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Connect with auth key</p>
+            <p className="text-sm text-gray-400">
+              Generate a reusable or one-time auth key in the{' '}
+              <a href="https://login.tailscale.com/admin/settings/keys" target="_blank" rel="noreferrer"
+                className="hover:underline" style={{ color: '#FFB800' }}>Tailscale admin console</a>
+              {' '}for headless setup — no browser needed on the device.
+            </p>
+            {keyError && <p className="text-sm text-red-400">{keyError}</p>}
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={authKey}
+                onChange={e => { setAuthKey(e.target.value); setKeyError(null) }}
+                placeholder="tskey-auth-…"
+                className={inputCls}
+                onFocus={e => e.target.style.borderColor = '#4c6e5d'}
+                onBlur={e => e.target.style.borderColor = '#484848'}
+                onKeyDown={e => e.key === 'Enter' && connectWithKey()}
+              />
+              <button
+                onClick={connectWithKey}
+                disabled={!authKey.trim() || connectingKey || fetchingAuth}
+                className="px-4 py-1.5 rounded-md text-sm font-medium disabled:opacity-50 hover:opacity-90 transition-opacity shrink-0"
+                style={{ background: '#FFB800', color: '#151925' }}
+              >
+                {connectingKey ? 'Connecting…' : 'Connect'}
+              </button>
+            </div>
           </div>
         </div>
 
       ) : (
         <div className="space-y-4">
-          {/* Status row */}
+          {/* Status + controls */}
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-400">Status</span>
             <div className="flex items-center gap-2">
@@ -204,6 +278,31 @@ function TailscaleCard() {
               </button>
             </>
           )}
+
+          {/* Disconnect / Logout */}
+          <div className="pt-2 border-t border-[#2E2E2E] space-y-2">
+            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Connection controls</p>
+            {actionError && <p className="text-sm text-red-400">{actionError}</p>}
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={disconnect}
+                disabled={disconnecting || loggingOut}
+                className="px-3 py-1.5 rounded-md text-sm disabled:opacity-50 hover:opacity-80 transition-opacity"
+                style={{ background: '#3A3A3A', color: '#9CA3AF' }}
+              >
+                {disconnecting ? 'Disconnecting…' : 'Disconnect'}
+              </button>
+              <button
+                onClick={logout}
+                disabled={disconnecting || loggingOut}
+                className="px-3 py-1.5 rounded-md text-sm disabled:opacity-50 hover:opacity-80 transition-opacity"
+                style={{ background: 'rgba(239,68,68,0.1)', color: '#F87171' }}
+              >
+                {loggingOut ? 'Logging out…' : 'Logout'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-600">Disconnect keeps your account linked. Logout removes this device from your Tailscale account.</p>
+          </div>
 
           {/* Access from other devices */}
           <div className="pt-2 border-t border-[#2E2E2E] space-y-2">

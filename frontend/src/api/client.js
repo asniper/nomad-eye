@@ -67,6 +67,9 @@ export const network = {
   apStop: () => api.post('/network/ap/stop'),
   tailscale: () => api.get('/network/tailscale'),
   tailscaleAuthUrl: () => api.post('/network/tailscale/auth-url'),
+  tailscaleUp: (authKey = '') => api.post('/network/tailscale/up', { auth_key: authKey }),
+  tailscaleDown: () => api.post('/network/tailscale/down'),
+  tailscaleLogout: () => api.post('/network/tailscale/logout'),
 }
 
 export const settings = {
