@@ -543,12 +543,17 @@ class DetectionPipeline:
         cooldown = 0
         last_yolo_time = None
         last_yolo_ms = None
+        last_frame_ts = 0.0
 
         while self._running:
             frame_obj = cam.get_frame()
             if frame_obj is None:
                 time.sleep(0.05)
                 continue
+            if frame_obj.timestamp == last_frame_ts:
+                time.sleep(0.02)
+                continue
+            last_frame_ts = frame_obj.timestamp
             frame = frame_obj.data
             has_motion, motion_mask = motion_detector.detect(frame)
             now = time.time()
