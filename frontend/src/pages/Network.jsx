@@ -12,6 +12,18 @@ const WIFI_ICON = (
 
 const TAILSCALE_INSTALL_CMD = 'curl -fsSL https://tailscale.com/install.sh | sh'
 
+function SignalBars({ value }) {
+  const filled = Math.ceil((value / 100) * 4)
+  const color = value >= 70 ? '#4ADE80' : value >= 40 ? '#FFB800' : '#EF4444'
+  return (
+    <div className="flex items-end gap-0.5" style={{ height: '16px' }}>
+      {[1, 2, 3, 4].map(i => (
+        <div key={i} className="w-1.5 rounded-sm" style={{ height: `${i * 25}%`, background: i <= filled ? color : '#3A3A3A' }} />
+      ))}
+    </div>
+  )
+}
+
 function CopyButton({ text, label = 'Copy', copiedLabel = 'Copied!' }) {
   const [copied, setCopied] = useState(false)
   return (
@@ -433,6 +445,15 @@ export default function Network() {
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-400">Network</span>
                 <span className="text-sm text-white font-medium">{netStatus.ssid}</span>
+              </div>
+            )}
+            {netStatus?.signal != null && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-400">Signal</span>
+                <div className="flex items-center gap-2">
+                  <SignalBars value={netStatus.signal} />
+                  <span className="text-sm text-white">{netStatus.signal}%</span>
+                </div>
               </div>
             )}
             {netStatus?.ip && (

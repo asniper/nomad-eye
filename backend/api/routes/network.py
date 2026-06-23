@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from networking.manager import (
     get_known_networks, connect_to_network, connect_saved_network, save_network,
     start_access_point, stop_access_point, get_current_ip, is_connected, nmcli,
-    _terse_split
+    _terse_split, get_network_status
 )
 from api.routes.auth import require_auth
 
@@ -48,13 +48,9 @@ def _get_hostname() -> str:
 
 @router.get("/")
 def network_status(_=Depends(require_auth)):
-    return {
-        "connected": is_connected(),
-        "ip": get_current_ip(),
-        "ssid": _get_current_ssid(),
-        "ap_active": _is_ap_active(),
-        "hostname": _get_hostname(),
-    }
+    status = get_network_status()
+    status["hostname"] = _get_hostname()
+    return status
 
 
 @router.get("/known")

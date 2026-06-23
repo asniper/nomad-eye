@@ -145,6 +145,56 @@ def is_ap_active() -> bool:
     return any("NomadEye-AP" in line for line in raw.splitlines())
 
 
+def get_network_status() -> dict:
+    """Consolidated status using 2 subprocess calls instead of 4."""
+    ssid = ""
+    signal = None
+    connected = False
+    ap_active = False
+    ip = ""
+
+    result = subprocess.run(
+        ["/usr/bin/nmcli", "-t", "-f", "GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS",
+         "dev", "show", "wlan0"],
+        capture_output=True, text=True
+    )
+    for line in result.stdout.splitlines():
+        parts = _terse_split(line, maxsplit=1)
+        if len(parts) < 2:
+            continue
+        key, val = parts[0].strip().upper(), parts[1].strip()
+        if key == "GENERAL.STATE":
+            connected = "connected" in val.lower() and "disconnected" not in val.lower()
+        elif key == "GENERAL.CONNECTION":
+            if val == "NomadEye-AP":
+                ap_active = True
+                connected = False
+            elif val and val != "--":
+                ssid = val
+        elif key.startswith("IP4.ADDRESS") and not ip and val and val != "--":
+            ip = val.split("/")[0]
+
+    if connected and not ip:
+        r2 = subprocess.run(["/usr/bin/hostname", "-I"], capture_output=True, text=True)
+        for addr in r2.stdout.strip().split():
+            if not any(addr.startswith(p) for p in ("172.", "127.", "169.")):
+                ip = addr
+                break
+
+    if connected:
+        raw = nmcli("-t", "-f", "ACTIVE,SIGNAL", "dev", "wifi", "list")
+        for line in raw.splitlines():
+            parts = _terse_split(line, maxsplit=1)
+            if len(parts) == 2 and parts[0].lower() == "yes":
+                try:
+                    signal = int(parts[1])
+                except (ValueError, IndexError):
+                    pass
+                break
+
+    return {"connected": connected, "ssid": ssid, "ip": ip, "ap_active": ap_active, "signal": signal}
+
+
 async def auto_connect_loop():
     while True:
         if not is_connected() and not is_ap_active():
