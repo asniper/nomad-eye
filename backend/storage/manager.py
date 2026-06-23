@@ -11,11 +11,11 @@ STORAGE_HELPER = "/opt/nomad-eye/storage-helper.sh"
 
 
 def get_active_clips_dir() -> str | None:
-    """Returns clips dir on the primary external storage, or None if unavailable.
+    """Returns clips dir on the clips primary storage, or None if unavailable.
     Clips are external-only — internal storage is too small for video."""
     try:
         db = sqlite3.connect(cfg.db_path)
-        row = db.execute("SELECT value FROM app_config WHERE key='storage_primary_device'").fetchone()
+        row = db.execute("SELECT value FROM app_config WHERE key='clips_primary_device'").fetchone()
         db.close()
     except Exception:
         row = None

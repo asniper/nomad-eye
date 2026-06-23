@@ -23,13 +23,22 @@ def _primary_device() -> str | None:
     return row[0] if row else None
 
 
+def _clips_primary_device() -> str | None:
+    db = sqlite3.connect(cfg.db_path)
+    row = db.execute("SELECT value FROM app_config WHERE key='clips_primary_device'").fetchone()
+    db.close()
+    return row[0] if (row and row[0]) else None
+
+
 @router.get("/devices")
 def get_devices(_=Depends(require_auth)):
     devices = list_external_devices()
     primary = _primary_device()
+    clips_primary = _clips_primary_device()
     for d in devices:
         d["is_primary"] = d["name"] == primary
-    return {"devices": devices, "primary": primary}
+        d["is_clips_primary"] = d["name"] == clips_primary
+    return {"devices": devices, "primary": primary, "clips_primary": clips_primary}
 
 
 @router.post("/devices/{device_name}/mount")
@@ -46,12 +55,13 @@ def mount(device_name: str, _=Depends(require_auth)):
 def unmount(device_name: str, _=Depends(require_auth)):
     if not _valid_device_name(device_name):
         raise HTTPException(status_code=400, detail="Invalid device name")
-    primary = _primary_device()
-    if primary == device_name:
-        db = sqlite3.connect(cfg.db_path)
+    db = sqlite3.connect(cfg.db_path)
+    if _primary_device() == device_name:
         db.execute("DELETE FROM app_config WHERE key='storage_primary_device'")
-        db.commit()
-        db.close()
+    if _clips_primary_device() == device_name:
+        db.execute("UPDATE app_config SET value='' WHERE key='clips_primary_device'")
+    db.commit()
+    db.close()
     ok, msg = unmount_device(device_name)
     if not ok:
         raise HTTPException(status_code=500, detail=msg)
@@ -62,12 +72,13 @@ def unmount(device_name: str, _=Depends(require_auth)):
 def format_dev(device_name: str, _=Depends(require_auth)):
     if not _valid_device_name(device_name):
         raise HTTPException(status_code=400, detail="Invalid device name")
-    primary = _primary_device()
-    if primary == device_name:
-        db = sqlite3.connect(cfg.db_path)
+    db = sqlite3.connect(cfg.db_path)
+    if _primary_device() == device_name:
         db.execute("DELETE FROM app_config WHERE key='storage_primary_device'")
-        db.commit()
-        db.close()
+    if _clips_primary_device() == device_name:
+        db.execute("UPDATE app_config SET value='' WHERE key='clips_primary_device'")
+    db.commit()
+    db.close()
     ok, msg = format_device(device_name)
     if not ok:
         raise HTTPException(status_code=500, detail=msg)
@@ -89,6 +100,23 @@ def set_primary(device_name: str, _=Depends(require_auth)):
     db.commit()
     db.close()
     return {"primary": device_name, "mount_point": mp}
+
+
+@router.post("/devices/{device_name}/set-clips-primary")
+def set_clips_primary(device_name: str, _=Depends(require_auth)):
+    if not _valid_device_name(device_name):
+        raise HTTPException(status_code=400, detail="Invalid device name")
+    mp = _get_mount_point(device_name)
+    if not mp:
+        raise HTTPException(status_code=400, detail="Device is not mounted")
+    db = sqlite3.connect(cfg.db_path)
+    db.execute(
+        "INSERT OR REPLACE INTO app_config (key, value) VALUES ('clips_primary_device', ?)",
+        (device_name,)
+    )
+    db.commit()
+    db.close()
+    return {"clips_primary": device_name, "mount_point": mp}
 
 
 @router.post("/set-primary-internal")

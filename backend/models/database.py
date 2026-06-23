@@ -188,6 +188,7 @@ def init_db():
         ('clips_purge_threshold',    '90'),
         ('motion_scale',             '0.5'),
         ('detection_cooldown',       '3.0'),
+        ('clips_primary_device',     ''),
     ]
     for key, value in defaults:
         db.execute(

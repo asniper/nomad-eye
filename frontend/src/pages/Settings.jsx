@@ -1216,7 +1216,7 @@ function VideoClipsCard() {
             </div>
           )}
           {clipStorage && !clipStorage.clips_dir && (
-            <p className="text-xs text-yellow-500 mb-3">No external drive set as primary — clips will not be saved. Go to Storage tab to select a drive.</p>
+            <p className="text-xs text-yellow-500 mb-3">No drive set for videos — clips will not be saved. Go to Storage tab and tap "Use for Videos" on a mounted drive.</p>
           )}
           {purgeResult !== null && (
             <p className="text-xs text-green-400 mb-2">{purgeResult} clip{purgeResult !== 1 ? 's' : ''} deleted.</p>
@@ -1764,6 +1764,7 @@ function StorageLocationCard() {
 function ExternalDevicesCard() {
   const [devices, setDevices] = useState([])
   const [primary, setPrimary] = useState(null)
+  const [clipsPrimary, setClipsPrimary] = useState(null)
   const [pending, setPending] = useState({})
   const [confirm, setConfirm] = useState(null)
   const [error, setError] = useState(null)
@@ -1771,7 +1772,12 @@ function ExternalDevicesCard() {
 
   const load = useCallback(() => {
     storageApi.devices()
-      .then(r => { setDevices(r.data.devices || []); setPrimary(r.data.primary); setError(null) })
+      .then(r => {
+        setDevices(r.data.devices || [])
+        setPrimary(r.data.primary)
+        setClipsPrimary(r.data.clips_primary)
+        setError(null)
+      })
       .catch(e => setError(e.response?.data?.detail || 'Failed to load devices — check your session'))
   }, [])
 
@@ -1785,6 +1791,7 @@ function ExternalDevicesCard() {
       else if (action === 'unmount') await storageApi.unmount(device)
       else if (action === 'format') await storageApi.format(device)
       else if (action === 'set-primary') await storageApi.setPrimary(device)
+      else if (action === 'set-clips-primary') await storageApi.setClipsPrimary(device)
       load()
     } catch (e) {
       setError(e.response?.data?.detail || `${label} failed`)
@@ -1824,6 +1831,7 @@ function ExternalDevicesCard() {
           {devices.map(dev => {
             const mounted = !!dev.mountpoint
             const isPrimary = dev.name === primary
+            const isClipsPrimary = dev.name === clipsPrimary
             return (
               <div key={dev.name} className="flex flex-col sm:flex-row sm:items-center gap-3 py-3 border-b border-[#3A3A3A] last:border-0">
                 <div className="flex-1 min-w-0">
@@ -1832,8 +1840,9 @@ function ExternalDevicesCard() {
                     <span className="text-xs text-gray-500">{dev.size}</span>
                     {dev.label && <span className="text-xs text-gray-400">"{dev.label}"</span>}
                     {dev.fstype && <span className="text-xs text-gray-600">{dev.fstype}</span>}
-                    {isPrimary && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(255,184,0,0.15)', color: '#FFB800' }}>Primary</span>}
-                    {mounted && !isPrimary && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.15)', color: '#4ADE80' }}>Mounted</span>}
+                    {isPrimary && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(255,184,0,0.15)', color: '#FFB800' }}>Images</span>}
+                    {isClipsPrimary && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(99,102,241,0.15)', color: '#818CF8' }}>Videos</span>}
+                    {mounted && !isPrimary && !isClipsPrimary && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.15)', color: '#4ADE80' }}>Mounted</span>}
                     {!mounted && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(156,163,175,0.15)', color: '#6B7280' }}>Not mounted</span>}
                   </div>
                   {mounted && <p className="text-xs text-gray-600 font-mono mt-0.5">{dev.mountpoint}</p>}
@@ -1858,6 +1867,16 @@ function ExternalDevicesCard() {
                       style={{ background: 'rgba(255,184,0,0.15)', color: '#FFB800' }}
                     >
                       {pending[`${dev.name}-set-primary`] ? 'Setting…' : 'Use for Images'}
+                    </button>
+                  )}
+                  {mounted && !isClipsPrimary && (
+                    <button
+                      onClick={() => act(dev.name, 'set-clips-primary', 'Set Clips Primary')}
+                      disabled={!!pending[`${dev.name}-set-clips-primary`]}
+                      className="px-3 py-1 text-xs rounded-md disabled:opacity-50 transition-colors"
+                      style={{ background: 'rgba(99,102,241,0.15)', color: '#818CF8' }}
+                    >
+                      {pending[`${dev.name}-set-clips-primary`] ? 'Setting…' : 'Use for Videos'}
                     </button>
                   )}
                   {mounted && (

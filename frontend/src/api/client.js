@@ -108,6 +108,7 @@ export const storage = {
   unmount: (device) => api.post(`/storage/devices/${device}/unmount`),
   format: (device) => api.post(`/storage/devices/${device}/format`),
   setPrimary: (device) => api.post(`/storage/devices/${device}/set-primary`),
+  setClipsPrimary: (device) => api.post(`/storage/devices/${device}/set-clips-primary`),
   setPrimaryInternal: () => api.post('/storage/set-primary-internal'),
   status: () => api.get('/storage/status'),
   browse: () => api.get('/storage/browse'),
