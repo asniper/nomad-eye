@@ -125,22 +125,24 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end gap-6 flex-wrap">
+      <div className="space-y-3">
         <h2 className="text-2xl font-bold" style={{ color: '#FFB800' }}>Settings</h2>
-        <div className="flex gap-1 border-b border-[#3A3A3A] pb-0">
-          {TABS.map(t => (
-            <button
-              key={t.id}
-              onClick={() => changeTab(t.id)}
-              className="px-4 py-1.5 text-sm font-medium transition-colors rounded-t-md"
-              style={tab === t.id
-                ? { color: '#FFB800', borderBottom: '2px solid #FFB800', marginBottom: '-1px' }
-                : { color: '#9CA3AF' }
-              }
-            >
-              {t.label}
-            </button>
-          ))}
+        <div className="overflow-x-auto" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+          <div className="flex gap-1 border-b border-[#3A3A3A] min-w-max">
+            {TABS.map(t => (
+              <button
+                key={t.id}
+                onClick={() => changeTab(t.id)}
+                className="px-4 py-1.5 text-sm font-medium transition-colors rounded-t-md whitespace-nowrap shrink-0"
+                style={tab === t.id
+                  ? { color: '#FFB800', borderBottom: '2px solid #FFB800', marginBottom: '-1px' }
+                  : { color: '#9CA3AF' }
+                }
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
