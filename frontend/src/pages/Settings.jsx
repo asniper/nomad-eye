@@ -127,22 +127,20 @@ export default function Settings() {
     <div className="space-y-6">
       <div className="space-y-3">
         <h2 className="text-2xl font-bold" style={{ color: '#FFB800' }}>Settings</h2>
-        <div className="overflow-x-auto" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
-          <div className="flex gap-1 border-b border-[#3A3A3A] min-w-max">
-            {TABS.map(t => (
-              <button
-                key={t.id}
-                onClick={() => changeTab(t.id)}
-                className="px-4 py-1.5 text-sm font-medium transition-colors rounded-t-md whitespace-nowrap shrink-0"
-                style={tab === t.id
-                  ? { color: '#FFB800', borderBottom: '2px solid #FFB800', marginBottom: '-1px' }
-                  : { color: '#9CA3AF' }
-                }
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+        <div className="grid grid-cols-3 gap-1 md:flex md:gap-0 md:border-b md:border-[#3A3A3A]">
+          {TABS.map(t => (
+            <button
+              key={t.id}
+              onClick={() => changeTab(t.id)}
+              className={`py-2 px-1 text-sm font-medium transition-colors text-center rounded-md md:rounded-t-md md:rounded-b-none md:px-4 md:py-1.5 ${
+                tab === t.id
+                  ? 'text-[#FFB800] bg-[rgba(255,184,0,0.10)] md:bg-transparent md:border-b-2 md:border-[#FFB800] md:-mb-px'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
       </div>
 
