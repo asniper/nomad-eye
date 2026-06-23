@@ -297,8 +297,8 @@ class DetectionPipeline:
             pass
 
     def _store_clip_record(self, event_id: str, camera_id: int, clip_path: str):
-        from datetime import datetime, timezone
-        db = sqlite3.connect(cfg.db_path)
+        import logging
+        db = sqlite3.connect(cfg.db_path, timeout=10)
         try:
             ts = datetime.now(timezone.utc).isoformat()
             db.execute(
@@ -307,6 +307,8 @@ class DetectionPipeline:
                 (event_id, clip_path, camera_id, ts),
             )
             db.commit()
+        except Exception as e:
+            logging.getLogger(__name__).error("Failed to store clip record for %s: %s", event_id, e)
         finally:
             db.close()
 

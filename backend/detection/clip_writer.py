@@ -9,6 +9,7 @@ CLIP_FPS = 5.0
 CLIP_PUSH_INTERVAL = 1.0 / CLIP_FPS
 CLIP_WIDTH = 640
 CLIP_HEIGHT = 360
+CLIP_MAX_DURATION = 120.0  # hard cap: 2 minutes per clip regardless of ongoing motion
 
 
 class ClipBuffer:
@@ -43,6 +44,7 @@ class EventClipWriter:
         self._camera_id = camera_id
         self._lock = threading.Lock()
         self._closed = False
+        self._start = time.time()
         self._last_extend = time.time()
 
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -84,7 +86,10 @@ class EventClipWriter:
                 pass
 
     def should_close(self, post_roll_secs: float) -> bool:
-        return not self._closed and time.time() - self._last_extend > post_roll_secs
+        if self._closed:
+            return False
+        now = time.time()
+        return (now - self._last_extend > post_roll_secs) or (now - self._start > CLIP_MAX_DURATION)
 
     def close(self) -> str | None:
         """Release writer. Returns the file path if the clip is valid, else None."""
