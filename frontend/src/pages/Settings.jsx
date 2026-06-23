@@ -1017,17 +1017,19 @@ function ChangePasswordCard() {
 }
 
 function StorageTab() {
+  const [refreshKey, setRefreshKey] = useState(0)
+  const triggerRefresh = useCallback(() => setRefreshKey(k => k + 1), [])
   return (
     <div className="space-y-6">
       <StorageLocationCard />
-      <ExternalDevicesCard />
+      <ExternalDevicesCard onDeviceChanged={triggerRefresh} />
       <StorageCard />
-      <VideoClipsCard />
+      <VideoClipsCard refreshKey={refreshKey} />
     </div>
   )
 }
 
-function VideoClipsCard() {
+function VideoClipsCard({ refreshKey = 0 }) {
   const [s, setS] = useState(null)
   const [clipStorage, setClipStorage] = useState(null)
   const [saving, setSaving] = useState({})
@@ -1041,7 +1043,7 @@ function VideoClipsCard() {
     detectionsApi.clipsStorage().then(r => setClipStorage(r.data)).catch(() => {})
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, [load, refreshKey])
 
   const save = async (key, value) => {
     setSaving(p => ({ ...p, [key]: true }))
@@ -1216,7 +1218,7 @@ function VideoClipsCard() {
             </div>
           )}
           {clipStorage && !clipStorage.clips_dir && (
-            <p className="text-xs text-yellow-500 mb-3">No drive set for videos — clips will not be saved. Go to Storage tab and tap "Use for Videos" on a mounted drive.</p>
+            <p className="text-xs text-yellow-500 mb-3">No drive set for videos — clips will not be saved. Tap "Use for Videos" on a mounted drive in the External Storage Devices card above.</p>
           )}
           {purgeResult !== null && (
             <p className="text-xs text-green-400 mb-2">{purgeResult} clip{purgeResult !== 1 ? 's' : ''} deleted.</p>
@@ -1780,7 +1782,7 @@ function StorageLocationCard() {
   )
 }
 
-function ExternalDevicesCard() {
+function ExternalDevicesCard({ onDeviceChanged }) {
   const [devices, setDevices] = useState([])
   const [primary, setPrimary] = useState(null)
   const [clipsPrimary, setClipsPrimary] = useState(null)
@@ -1812,6 +1814,7 @@ function ExternalDevicesCard() {
       else if (action === 'set-primary') await storageApi.setPrimary(device)
       else if (action === 'set-clips-primary') await storageApi.setClipsPrimary(device)
       load()
+      if (action === 'set-primary' || action === 'set-clips-primary' || action === 'unmount') onDeviceChanged?.()
     } catch (e) {
       setError(e.response?.data?.detail || `${label} failed`)
     }
