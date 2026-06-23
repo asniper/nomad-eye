@@ -1266,6 +1266,28 @@ function UpdateCard() {
 
   useEffect(() => { checkRef.current = check }, [check])
 
+  // After a restart, poll until service responds (up to 60s), then refresh status.
+  const waitForRestart = useCallback(() => {
+    setInstallDone(true)
+    let attempts = 0
+    const t = setInterval(async () => {
+      attempts++
+      try {
+        const r = await systemApi.updateStatus()
+        clearInterval(t)
+        setInstallDone(false)
+        setStatus(r.data)
+        setError(null)
+      } catch {
+        if (attempts >= 20) {
+          clearInterval(t)
+          setInstallDone(false)
+          setError('Service did not come back after restart — check the device manually')
+        }
+      }
+    }, 3000)
+  }, [])
+
   // beginPoll starts the interval. alreadyInProgress=true skips waiting for
   // update_in_progress to become true first (used when resuming after a page refresh).
   const beginPoll = useCallback((alreadyInProgress = false) => {
@@ -1287,9 +1309,7 @@ function UpdateCard() {
         if (!seenInProgress) return
         clearInterval(pollRef.current); pollRef.current = null; setInstalling(false)
         if (s.last_result === 'success' || s.last_result == null) {
-          // null means service restarted and wiped in-memory status — counts as success
-          setInstallDone(true)
-          setTimeout(() => { setInstallDone(false); checkRef.current?.() }, 5000)
+          waitForRestart()
         } else {
           setError(
             s.last_result === 'no_release' ? 'No release found' :
@@ -1300,11 +1320,10 @@ function UpdateCard() {
       } catch {
         // Network error = service restarting after successful update
         clearInterval(pollRef.current); pollRef.current = null; setInstalling(false)
-        setInstallDone(true)
-        setTimeout(() => { setInstallDone(false); checkRef.current?.() }, 5000)
+        waitForRestart()
       }
     }, 3000)
-  }, [])
+  }, [waitForRestart])
 
   useEffect(() => {
     check().then(data => {
