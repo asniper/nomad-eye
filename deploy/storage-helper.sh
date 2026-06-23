@@ -35,10 +35,14 @@ case "$ACTION" in
   mount)
     mkdir -p "$MP"
     if mountpoint -q "$MP" 2>/dev/null; then
+        chown arduino:arduino "$MP" 2>/dev/null || true
         echo "$MP"
         exit 0
     fi
     mount "$DEVPATH" "$MP"
+    chown arduino:arduino "$MP"
+    mkdir -p "$MP/nomadeye/images" "$MP/nomadeye/clips"
+    chown -R arduino:arduino "$MP/nomadeye"
     echo "$MP"
     ;;
 
