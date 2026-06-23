@@ -6,7 +6,7 @@ After=network.target
 User=arduino
 WorkingDirectory=/opt/nomad-eye/backend
 Environment=PATH=/opt/nomad-eye/backend/venv/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/opt/nomad-eye/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8080
+ExecStart=/opt/nomad-eye/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8080 --loop uvloop
 Restart=always
 RestartSec=5
 
