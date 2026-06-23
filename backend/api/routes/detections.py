@@ -244,6 +244,7 @@ def delete_event(event_id: str, db: sqlite3.Connection = Depends(get_db), _=Depe
 
 @router.get("/clips/storage")
 def get_clips_storage(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+    import shutil as _shutil
     rows = db.execute("SELECT clip_path FROM event_clips").fetchall()
     clip_count = len(rows)
     clip_bytes = 0
@@ -254,10 +255,20 @@ def get_clips_storage(db: sqlite3.Connection = Depends(get_db), _=Depends(requir
             except OSError:
                 pass
     clips_dir = get_active_clips_dir()
+    disk_total = disk_used = disk_free = 0
+    if clips_dir:
+        try:
+            du = _shutil.disk_usage(clips_dir)
+            disk_total, disk_used, disk_free = du.total, du.used, du.free
+        except Exception:
+            pass
     return {
         "clip_count": clip_count,
         "clip_bytes": clip_bytes,
         "clips_dir": clips_dir,
+        "disk_total": disk_total,
+        "disk_used": disk_used,
+        "disk_free": disk_free,
     }
 
 

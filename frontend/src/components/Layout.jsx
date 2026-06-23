@@ -50,7 +50,7 @@ export default function Layout({ children }) {
   const [menuOpen, setMenuOpen] = useState(false)
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-dvh overflow-hidden">
       {menuOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/60 md:hidden"
@@ -153,7 +153,7 @@ export default function Layout({ children }) {
           <img src={logoNarrowUrl} alt="Nomad Eye" className="max-h-20 w-auto" />
         </div>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-4 pb-8 md:p-6">{children}</main>
       </div>
     </div>
   )

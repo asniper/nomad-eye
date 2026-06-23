@@ -802,7 +802,7 @@ function FaceManageModal({ group, knownNames, onClose, onUpdate }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.72)' }}
       onClick={onClose}>
-      <div className="rounded-xl p-4 w-full max-w-md max-h-[80vh] flex flex-col"
+      <div className="rounded-xl p-4 w-full max-w-md max-h-[90dvh] flex flex-col"
         style={{ background: '#1A1A1A', border: '1px solid #3A3A3A' }}
         onClick={e => e.stopPropagation()}>
 
@@ -1191,12 +1191,32 @@ function VideoClipsCard() {
 
         {/* Clip storage stats + manual purge */}
         <div className="pt-3">
-          {clipStorage && (
-            <p className="text-xs text-gray-500 mb-3">
-              {clipStorage.clip_count} clip{clipStorage.clip_count !== 1 ? 's' : ''} stored
-              {clipStorage.clip_bytes > 0 ? ` · ${fmtBytes(clipStorage.clip_bytes)}` : ''}
-              {clipStorage.clips_dir ? ` · ${clipStorage.clips_dir}` : ' · no external drive mounted'}
-            </p>
+          {clipStorage && clipStorage.disk_total > 0 && (
+            <div className="mb-4 p-3 rounded-lg" style={{ background: '#222' }}>
+              <div className="flex justify-between text-xs text-gray-400 mb-1.5">
+                <span className="font-medium text-white">Drive storage</span>
+                <span>{fmtBytes(clipStorage.disk_used)} / {fmtBytes(clipStorage.disk_total)} · {fmtBytes(clipStorage.disk_free)} free</span>
+              </div>
+              <div className="relative w-full h-3 bg-[#3A3A3A] rounded-full overflow-hidden">
+                {(() => {
+                  const usedPct = clipStorage.disk_total ? (clipStorage.disk_used / clipStorage.disk_total) * 100 : 0
+                  const clipsPct = clipStorage.disk_total ? (clipStorage.clip_bytes / clipStorage.disk_total) * 100 : 0
+                  const otherPct = Math.max(0, usedPct - clipsPct)
+                  const barColor = usedPct > 85 ? '#EF4444' : usedPct > 65 ? '#F59E0B' : '#4c6e5d'
+                  return <>
+                    <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${otherPct}%`, background: barColor, opacity: 0.4 }} />
+                    <div className="absolute inset-y-0 rounded-full" style={{ left: `${otherPct}%`, width: `${clipsPct}%`, background: '#FFB800' }} />
+                  </>
+                })()}
+              </div>
+              <div className="flex gap-4 mt-1.5 text-xs text-gray-500">
+                <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: '#FFB800' }} />{fmtBytes(clipStorage.clip_bytes)} clips ({clipStorage.clip_count})</span>
+                <span><span className="inline-block w-2 h-2 rounded-full mr-1 opacity-40" style={{ background: '#4c6e5d' }} />other used</span>
+              </div>
+            </div>
+          )}
+          {clipStorage && !clipStorage.clips_dir && (
+            <p className="text-xs text-yellow-500 mb-3">No external drive set as primary — clips will not be saved. Go to Storage tab to select a drive.</p>
           )}
           {purgeResult !== null && (
             <p className="text-xs text-green-400 mb-2">{purgeResult} clip{purgeResult !== 1 ? 's' : ''} deleted.</p>
