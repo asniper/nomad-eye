@@ -213,6 +213,39 @@ export default function Settings() {
             saved={saved.motion_threshold}
           />
         </SettingRow>
+        <SettingRow label="Motion detection scale" hint="Resolution used for motion detection. Lower = less CPU, slightly less precise.">
+          <div className="flex gap-2 flex-wrap">
+            {[
+              { id: '1.0', label: 'Full', sub: '1280×720' },
+              { id: '0.5', label: 'Half', sub: '640×360' },
+              { id: '0.25', label: 'Quarter', sub: '320×180' },
+            ].map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => saveSetting('motion_scale', opt.id)}
+                disabled={saving.motion_scale}
+                className="px-3 py-1.5 rounded-md text-sm font-medium transition-opacity hover:opacity-80 disabled:opacity-50"
+                style={(allSettings.motion_scale ?? '0.5') === opt.id
+                  ? { background: '#FFB800', color: '#151925' }
+                  : { background: '#3A3A3A', color: '#ffffff' }
+                }
+              >
+                {opt.label} <span className="text-xs opacity-70">{opt.sub}</span>
+              </button>
+            ))}
+            {saved.motion_scale && <span className="text-xs text-green-400 self-center">Saved ✓</span>}
+          </div>
+        </SettingRow>
+        <SettingRow label="Detection interval" hint="Seconds between AI scans when motion is active. Lower = more responsive, more CPU.">
+          <NumberInput
+            keyName="detection_cooldown"
+            current={parseFloat(allSettings.detection_cooldown ?? 3.0)}
+            min={0.5} max={30} step={0.5}
+            onSave={saveSetting}
+            saving={saving.detection_cooldown}
+            saved={saved.detection_cooldown}
+          />
+        </SettingRow>
         </div>
       </Card>
 

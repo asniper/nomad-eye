@@ -73,6 +73,8 @@ async def lifespan(app: FastAPI):
     qkv = {r[0]: r[1] for r in quality_rows}
     motion_row = db.execute("SELECT value FROM app_config WHERE key='motion_threshold'").fetchone()
     initial_motion_threshold = int(motion_row[0]) if motion_row else None
+    motion_scale_row = db.execute("SELECT value FROM app_config WHERE key='motion_scale'").fetchone()
+    detection_cooldown_row = db.execute("SELECT value FROM app_config WHERE key='detection_cooldown'").fetchone()
     classes_row = db.execute("SELECT value FROM app_config WHERE key='detection_classes'").fetchone()
     clips_enabled_row = db.execute("SELECT value FROM app_config WHERE key='clips_enabled'").fetchone()
     clips_pre_roll_row = db.execute("SELECT value FROM app_config WHERE key='clips_pre_roll'").fetchone()
@@ -94,6 +96,16 @@ async def lifespan(app: FastAPI):
     pipeline.set_face_confidence(initial_face_confidence)
     if initial_motion_threshold is not None:
         pipeline.set_motion_threshold(initial_motion_threshold)
+    if motion_scale_row:
+        try:
+            pipeline.set_motion_scale(float(motion_scale_row[0]))
+        except ValueError:
+            pass
+    if detection_cooldown_row:
+        try:
+            pipeline.set_detection_cooldown(float(detection_cooldown_row[0]))
+        except ValueError:
+            pass
     for row in enabled_rows:
         category = row[0][len('category_enabled_'):]
         if row[1] == '0':

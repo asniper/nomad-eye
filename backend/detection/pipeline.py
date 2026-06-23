@@ -111,7 +111,9 @@ class DetectionPipeline:
     def __init__(self, cameras: list[CameraCapture], model_name: str = "yolov8n.pt", confidences: dict = None, classes: list = None):
         self._cameras = list(cameras)
         self._motion_threshold: int = cfg.motion_threshold
-        self._detectors = {cam.camera_id: MotionDetector(threshold=self._motion_threshold) for cam in cameras}
+        self._motion_scale: float = 0.5
+        self._detection_cooldown: float = COOLDOWN_SECS
+        self._detectors = {cam.camera_id: MotionDetector(threshold=self._motion_threshold, scale=self._motion_scale) for cam in cameras}
         _model_key = model_name.removesuffix('.pt') if model_name.endswith('.pt') else model_name
         self._detection_model_key: str = _model_key
         self._detection_classes: list = classes
@@ -384,11 +386,21 @@ class DetectionPipeline:
             for cam_id, det in self._detectors.items():
                 det._threshold = value
 
+    def set_motion_scale(self, scale: float):
+        self._motion_scale = max(0.25, min(1.0, scale))
+        with self._lock:
+            for cam_id in list(self._detectors.keys()):
+                self._detectors[cam_id] = MotionDetector(
+                    threshold=self._motion_threshold, scale=self._motion_scale)
+
+    def set_detection_cooldown(self, secs: float):
+        self._detection_cooldown = max(0.5, float(secs))
+
     def reset_tracking(self, camera_id: int):
         """Reset the motion detector, clear latest detections, and reset event state."""
         with self._lock:
             if camera_id in self._detectors:
-                self._detectors[camera_id] = MotionDetector(threshold=self._motion_threshold)
+                self._detectors[camera_id] = MotionDetector(threshold=self._motion_threshold, scale=self._motion_scale)
             self._latest_detections.pop(camera_id, None)
             self._active_events.pop(camera_id, None)
         self._last_motion_time.pop(camera_id, None)
@@ -436,7 +448,7 @@ class DetectionPipeline:
             return False
         with self._lock:
             self._cameras.append(cap)
-            self._detectors[camera_id] = MotionDetector(threshold=self._motion_threshold)
+            self._detectors[camera_id] = MotionDetector(threshold=self._motion_threshold, scale=self._motion_scale)
             self._overlay_enabled[camera_id] = True
             if self._running:
                 t = threading.Thread(target=self._run_camera, args=(cap,), daemon=True)
@@ -479,7 +491,7 @@ class DetectionPipeline:
 
         with self._lock:
             self._cameras.append(new_cap)
-            self._detectors[camera_id] = MotionDetector(threshold=self._motion_threshold)
+            self._detectors[camera_id] = MotionDetector(threshold=self._motion_threshold, scale=self._motion_scale)
             self._overlay_enabled[camera_id] = overlay
             if self._running:
                 t = threading.Thread(target=self._run_camera, args=(new_cap,), daemon=True)
@@ -504,7 +516,7 @@ class DetectionPipeline:
             # Add newly found cameras
             for cap in new_captures:
                 self._cameras.append(cap)
-                self._detectors[cap.camera_id] = MotionDetector(threshold=self._motion_threshold)
+                self._detectors[cap.camera_id] = MotionDetector(threshold=self._motion_threshold, scale=self._motion_scale)
                 self._overlay_enabled[cap.camera_id] = True
                 if self._running:
                     t = threading.Thread(target=self._run_camera, args=(cap,), daemon=True)
@@ -596,7 +608,7 @@ class DetectionPipeline:
                 if motion_secs > STUCK_MOTION_SECS:
                     self._auto_resets[cam.camera_id] = self._auto_resets.get(cam.camera_id, 0) + 1
                     with self._lock:
-                        self._detectors[cam.camera_id] = MotionDetector(threshold=self._motion_threshold)
+                        self._detectors[cam.camera_id] = MotionDetector(threshold=self._motion_threshold, scale=self._motion_scale)
                         self._latest_detections.pop(cam.camera_id, None)
                         self._active_events.pop(cam.camera_id, None)
                     motion_detector = self._detectors[cam.camera_id]
@@ -726,7 +738,7 @@ class DetectionPipeline:
                         self._latest_detections.pop(cam.camera_id, None)
                     active = self._active_events.get(cam.camera_id, [])
                     active[:] = [ev for ev in active if now - ev['last_seen'] <= EVENT_GAP]
-                    cooldown = now + COOLDOWN_SECS
+                    cooldown = now + self._detection_cooldown
                     # Refresh debug with latest YOLO stats
                     self._debug_stats[cam.camera_id] = self._debug_snapshot(
                         cam.camera_id, 'motion', True, motion_secs, 0,

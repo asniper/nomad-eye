@@ -96,6 +96,16 @@ async def set_setting(body: ConfigItem, db: sqlite3.Connection = Depends(get_db)
             _pipeline.set_motion_threshold(int(body.value))
         except ValueError:
             pass
+    elif body.key == 'motion_scale' and _pipeline is not None:
+        try:
+            _pipeline.set_motion_scale(float(body.value))
+        except ValueError:
+            pass
+    elif body.key == 'detection_cooldown' and _pipeline is not None:
+        try:
+            _pipeline.set_detection_cooldown(float(body.value))
+        except ValueError:
+            pass
     elif body.key.startswith('category_enabled_') and _pipeline is not None:
         category = body.key[len('category_enabled_'):]
         _pipeline.set_category_enabled(category, body.value != '0')
