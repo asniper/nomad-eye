@@ -290,11 +290,33 @@ class DetectionPipeline:
                 ).start()
 
     def _save_clip(self, event_id: str, camera_id: int, clip_path: str):
+        clip_path = self._convert_to_h264(clip_path) or clip_path
         self._store_clip_record(event_id, camera_id, clip_path)
         try:
             self._auto_purge_clips()
         except Exception:
             pass
+
+    def _convert_to_h264(self, clip_path: str) -> str | None:
+        import subprocess, logging
+        tmp = clip_path + '.h264tmp.mp4'
+        try:
+            r = subprocess.run(
+                ['ffmpeg', '-i', clip_path, '-c:v', 'libx264', '-preset', 'ultrafast',
+                 '-crf', '28', '-movflags', '+faststart', '-an', '-y', tmp],
+                capture_output=True, timeout=180
+            )
+            if r.returncode == 0 and Path(tmp).exists() and Path(tmp).stat().st_size > 5000:
+                Path(clip_path).unlink(missing_ok=True)
+                Path(tmp).rename(clip_path)
+                return clip_path
+        except FileNotFoundError:
+            pass  # ffmpeg not installed, use original
+        except Exception as e:
+            logging.getLogger(__name__).warning('H.264 conversion failed for %s: %s', clip_path, e)
+        finally:
+            Path(tmp).unlink(missing_ok=True)
+        return None
 
     def _store_clip_record(self, event_id: str, camera_id: int, clip_path: str):
         import logging

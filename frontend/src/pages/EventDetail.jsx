@@ -58,6 +58,73 @@ function Lightbox({ src, onClose }) {
   )
 }
 
+function ClipSection({ eventId }) {
+  const [src, setSrc] = useState(null)
+  const [clipError, setClipError] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const urlRef = useRef(null)
+
+  useEffect(() => {
+    let active = true
+    detections.clip(eventId)
+      .then(r => {
+        if (!active) return
+        const url = URL.createObjectURL(r.data)
+        urlRef.current = url
+        setSrc(url)
+      })
+      .catch(() => { if (active) setClipError(true) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => {
+      active = false
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current)
+    }
+  }, [eventId])
+
+  const handleDownload = () => {
+    if (!src) return
+    const a = document.createElement('a')
+    a.href = src
+    a.download = `clip-${eventId}.mp4`
+    a.click()
+  }
+
+  if (clipError) return (
+    <Card>
+      <p className="text-sm text-gray-400 font-medium mb-2">Video Clip</p>
+      <p className="text-sm text-red-400">Clip not available.</p>
+    </Card>
+  )
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-sm text-gray-400 font-medium">Video Clip</p>
+        {src && (
+          <button
+            onClick={handleDownload}
+            className="text-xs px-2.5 py-1 rounded transition-colors hover:opacity-80"
+            style={{ background: '#3A3A3A', color: '#9CA3AF' }}
+          >
+            Download
+          </button>
+        )}
+      </div>
+      {loading ? (
+        <div className="w-full aspect-video bg-[#3A3A3A] rounded-lg animate-pulse" />
+      ) : (
+        <video
+          src={src}
+          controls
+          autoPlay
+          className="w-full rounded-lg"
+          style={{ background: '#000' }}
+        />
+      )}
+    </Card>
+  )
+}
+
 export default function EventDetail() {
   const { eventId } = useParams()
   const navigate = useNavigate()
@@ -67,11 +134,14 @@ export default function EventDetail() {
   const [lightbox, setLightbox] = useState(null)
   const [error, setError] = useState(null)
   const [deleting, setDeleting] = useState(false)
+  const [deletingClip, setDeletingClip] = useState(false)
+  const [hasClip, setHasClip] = useState(false)
 
   useEffect(() => {
     detections.event(eventId)
       .then(r => {
         setEvent(r.data)
+        setHasClip(r.data.has_clip === 1)
         return cameras.list().then(cr => {
           const cam = cr.data.find(c => c.id === r.data.camera_id)
           setCameraName(cam?.name || `Camera ${r.data.camera_id}`)
@@ -104,19 +174,37 @@ export default function EventDetail() {
       <div className="flex items-center gap-3 flex-wrap">
         <Link to="/detections" className="text-sm hover:underline" style={{ color: '#FFB800' }}>← Detections</Link>
         <h2 className="text-2xl font-bold text-white capitalize">{event.label} Event</h2>
-        <button
-          disabled={deleting}
-          onClick={() => {
-            if (!window.confirm('Delete this event and all its images?')) return
-            setDeleting(true)
-            detections.deleteEvent(eventId)
-              .then(() => navigate('/detections'))
-              .catch(() => setDeleting(false))
-          }}
-          className="ml-auto px-3 py-1.5 rounded-md text-xs font-medium bg-red-900/40 text-red-400 hover:bg-red-900/60 disabled:opacity-40 transition-colors"
-        >
-          {deleting ? 'Deleting…' : 'Delete Event'}
-        </button>
+        <div className="ml-auto flex gap-2">
+          {hasClip && (
+            <button
+              disabled={deletingClip}
+              onClick={() => {
+                if (!window.confirm('Delete the video clip for this event?')) return
+                setDeletingClip(true)
+                detections.deleteClip(eventId)
+                  .then(() => setHasClip(false))
+                  .catch(() => {})
+                  .finally(() => setDeletingClip(false))
+              }}
+              className="px-3 py-1.5 rounded-md text-xs font-medium bg-[#3A3A3A] text-gray-400 hover:bg-[#484848] disabled:opacity-40 transition-colors"
+            >
+              {deletingClip ? 'Deleting…' : 'Delete Clip'}
+            </button>
+          )}
+          <button
+            disabled={deleting}
+            onClick={() => {
+              if (!window.confirm('Delete this event and all its images?')) return
+              setDeleting(true)
+              detections.deleteEvent(eventId)
+                .then(() => navigate('/detections'))
+                .catch(() => setDeleting(false))
+            }}
+            className="px-3 py-1.5 rounded-md text-xs font-medium bg-red-900/40 text-red-400 hover:bg-red-900/60 disabled:opacity-40 transition-colors"
+          >
+            {deleting ? 'Deleting…' : 'Delete Event'}
+          </button>
+        </div>
       </div>
 
       <Card>
@@ -132,6 +220,8 @@ export default function EventDetail() {
         </div>
         <p className="text-xs text-gray-500 mt-2">{formatDateTime(event.first_seen)}</p>
       </Card>
+
+      {hasClip && <ClipSection eventId={eventId} />}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {ids.map((id, i) => (
