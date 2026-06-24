@@ -8,8 +8,10 @@
 
 ```
 python3  python3-venv  nodejs  npm  git
-libopencv-dev  python3-opencv  network-manager  curl
+libopencv-dev  python3-opencv  network-manager  curl  ffmpeg
 ```
+
+`ffmpeg` is used to convert recorded clips to H.264 so they play in all browsers.
 
 Your device must be running Debian or Ubuntu Linux. The deploy script uses `apt`.
 
@@ -43,7 +45,7 @@ Follow these steps if you want to understand or customize the install process.
 ```bash
 sudo apt update
 sudo apt install -y python3 python3-venv nodejs npm git \
-    libopencv-dev python3-opencv network-manager curl
+    libopencv-dev python3-opencv network-manager curl ffmpeg
 ```
 
 ### 2. Clone the repository

@@ -42,6 +42,9 @@ sqlite3 /opt/nomad-eye/data/db/nomadeye.db "SELECT key, value FROM app_config;"
 | `category_enabled_animals` | `1` / `0` |
 | `category_enabled_faces` | `1` / `0` |
 | `yoloworld_classes` | Comma-separated class names for YOLOWorld open-vocab detection |
+| `images_primary_device` | Device name (e.g. `sda1`) for image storage; empty = internal |
+| `clips_primary_device` | Device name for video clip storage; empty = internal |
+| `clips_purge_threshold` | Disk usage % that triggers auto-purge of old clips (default `90`) |
 | `external_url` | Base URL used in notification links (set to Tailscale IP for remote access) |
 | `twilio_account_sid` | Twilio account SID for SMS notifications |
 | `twilio_auth_token` | Twilio auth token |

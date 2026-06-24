@@ -20,10 +20,14 @@ Nomad Eye includes an in-app Tailscale setup flow.
    ```bash
    curl -fsSL https://tailscale.com/install.sh | sh
    ```
-2. Once installed, click **Connect Account**
-3. Nomad Eye will display an authentication URL — open it in a browser on any device where you're logged into your Tailscale account
-4. Authorize the device in the Tailscale admin console
-5. The device will appear as connected in the UI with its Tailscale IP and MagicDNS hostname
+2. Once installed, click **Connect Account** — Nomad Eye will display an authentication URL. Open it in a browser on any device where you're logged into your Tailscale account.
+
+   Alternatively, if you have a reusable auth key from the [Tailscale admin console](https://login.tailscale.com/admin/settings/keys), enter it in the **Auth Key** field and click **Connect with Key** to authenticate without going through the browser flow.
+
+3. Authorize the device in the Tailscale admin console
+4. The device will appear as connected in the UI with its Tailscale IP and MagicDNS hostname
+
+On successful connect, Nomad Eye automatically grants the `arduino` service user operator permissions (`tailscale set --operator=arduino`). This allows in-app disconnect and logout to work without requiring root access.
 
 ---
 
@@ -32,13 +36,13 @@ Nomad Eye includes an in-app Tailscale setup flow.
 After Tailscale is connected:
 
 ```
-http://<tailscale-ip>:8000
+http://<tailscale-ip>
 ```
 
 or using MagicDNS (if enabled in your Tailscale admin console):
 
 ```
-http://<hostname>.your-tailnet.ts.net:8000
+http://<hostname>.your-tailnet.ts.net
 ```
 
 MagicDNS hostnames require your accessing device to also be on the tailnet. Tailscale IP addresses (100.x.x.x) always work regardless of MagicDNS.
@@ -52,7 +56,7 @@ Notification messages include a link back to the detection event. For remote acc
 **Settings → Notifications → Notification URL**
 
 ```
-http://100.x.x.x:8000
+http://100.x.x.x
 ```
 
 Links in SMS and email notifications will now point to the Tailscale address, accessible from anywhere on your tailnet.
@@ -73,11 +77,13 @@ Shared users can access `http://<tailscale-ip>:8000` using the web UI login. The
 
 ---
 
-## Disconnecting Tailscale
+## Disconnecting and Logging Out
 
-**Settings → Remote Access → Tailscale → Disconnect**
+**Settings → Remote Access → Tailscale → Disconnect** — takes the device offline (equivalent to `tailscale down`) but keeps it authenticated. Reconnect any time without re-authenticating.
 
-This logs the device out of Tailscale. The device will no longer be reachable via its Tailscale address. Tailscale itself remains installed; you can reconnect at any time.
+**Settings → Remote Access → Tailscale → Logout** — fully removes the device from your tailnet. You'll need to re-authenticate via the browser flow or an auth key to reconnect.
+
+Both operations run as the `arduino` user without root because Nomad Eye sets the Tailscale operator on connect.
 
 ---
 

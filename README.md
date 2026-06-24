@@ -11,7 +11,7 @@ Self-hosted AI security camera system — runs entirely on-device, no cloud requ
 - **AI detection** — YOLO-based detection for people, vehicles, animals, and custom classes
 - **Face recognition** — identify known faces and build a local face library from captures
 - **Live MJPEG streams** — real-time video with motion and detection overlay
-- **Detection events** — saves image snapshots and 5s before/after video clips locally
+- **Detection events** — saves image snapshots and H.264 video clips (pre-roll + post-roll) locally; watch clips inline or download from the event detail page
 - **Notifications** — SMS via Twilio, email via SMTP; rule-based by category, time window, and frequency
 - **WiFi management** — scan, connect, and forget networks from the UI; captive portal hotspot for initial setup
 - **Tailscale remote access** — in-app setup flow with node sharing guide
