@@ -2,8 +2,11 @@ import cv2
 import numpy as np
 import time
 import threading
+import logging
 from collections import deque
 from pathlib import Path
+
+_log = logging.getLogger(__name__)
 
 CLIP_FPS = 5.0
 CLIP_PUSH_INTERVAL = 1.0 / CLIP_FPS
@@ -53,16 +56,21 @@ class EventClipWriter:
         gst = (f'appsrc ! videoconvert ! openh264enc ! h264parse ! mp4mux '
                f'! filesink location={output_path}')
         self._writer = cv2.VideoWriter(gst, cv2.CAP_GSTREAMER, 0, CLIP_FPS, (CLIP_WIDTH, CLIP_HEIGHT), True)
-        if not self._writer.isOpened():
+        if self._writer.isOpened():
+            _log.info('clip_writer: using GStreamer openh264enc for %s', output_path)
+        else:
             self._writer.release()
             # Fallback: FFmpeg avc1
             fourcc = cv2.VideoWriter_fourcc(*'avc1')
             self._writer = cv2.VideoWriter(output_path, fourcc, CLIP_FPS, (CLIP_WIDTH, CLIP_HEIGHT))
-        if not self._writer.isOpened():
-            self._writer.release()
-            # Last resort: mp4v
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            self._writer = cv2.VideoWriter(output_path, fourcc, CLIP_FPS, (CLIP_WIDTH, CLIP_HEIGHT))
+            if self._writer.isOpened():
+                _log.info('clip_writer: using FFmpeg avc1 for %s', output_path)
+            else:
+                self._writer.release()
+                # Last resort: mp4v
+                _log.warning('clip_writer: H.264 failed, falling back to mp4v for %s', output_path)
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                self._writer = cv2.VideoWriter(output_path, fourcc, CLIP_FPS, (CLIP_WIDTH, CLIP_HEIGHT))
 
         for jpeg_bytes in pre_roll:
             self._write_jpeg(jpeg_bytes)
