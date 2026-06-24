@@ -152,8 +152,7 @@ function EventRow({ ev, cameraNames, onDelete }) {
   const [lightbox, setLightbox] = useState(null)
   const [clipOpen, setClipOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [deletingClip, setDeletingClip] = useState(false)
-  const [hasClip, setHasClip] = useState(ev.has_clip === 1)
+  const [hasClip] = useState(ev.has_clip === 1)
   const ids = ev.detection_ids || []
   const previewIds = ids.slice(0, 4)
   const hasMore = ids.length > 4
@@ -212,21 +211,6 @@ function EventRow({ ev, cameraNames, onDelete }) {
                   style={{ color: '#60A5FA' }}
                 >
                   ▶ Clip
-                </button>
-              )}
-              {hasClip && (
-                <button
-                  disabled={deletingClip}
-                  onClick={() => {
-                    setDeletingClip(true)
-                    detections.deleteClip(ev.event_id)
-                      .then(() => setHasClip(false))
-                      .catch(() => {})
-                      .finally(() => setDeletingClip(false))
-                  }}
-                  className="text-xs text-gray-500 hover:text-gray-300 disabled:opacity-40 transition-colors"
-                >
-                  {deletingClip ? '…' : 'Del clip'}
                 </button>
               )}
               <button
