@@ -143,7 +143,7 @@ def tailscale_auth_url(_=Depends(require_auth)):
     import re
     try:
         result = subprocess.run(
-            ['tailscale', 'up'],
+            ['tailscale', 'up', '--operator=arduino'],
             capture_output=True, text=True, timeout=8,
         )
         combined = result.stdout + result.stderr
@@ -177,7 +177,7 @@ class TailscaleUpRequest(BaseModel):
 
 @router.post("/tailscale/up")
 def tailscale_up(body: TailscaleUpRequest, _=Depends(require_auth)):
-    cmd = ['tailscale', 'up', '--accept-routes']
+    cmd = ['tailscale', 'up', '--operator=arduino', '--accept-routes']
     if body.auth_key.strip():
         cmd.append(f'--authkey={body.auth_key.strip()}')
     try:
