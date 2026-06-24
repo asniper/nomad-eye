@@ -108,10 +108,13 @@ def get_event(
     _=Depends(require_auth)
 ):
     meta = db.execute("""
-        SELECT event_id, category, label, camera_id,
-               MIN(timestamp) as first_seen, MAX(timestamp) as last_seen,
-               COUNT(*) as screenshot_count
-        FROM detections WHERE event_id = ?
+        SELECT d.event_id, d.category, d.label, d.camera_id,
+               MIN(d.timestamp) as first_seen, MAX(d.timestamp) as last_seen,
+               COUNT(*) as screenshot_count,
+               CASE WHEN ec.event_id IS NOT NULL THEN 1 ELSE 0 END as has_clip
+        FROM detections d
+        LEFT JOIN event_clips ec ON d.event_id = ec.event_id
+        WHERE d.event_id = ?
     """, (event_id,)).fetchone()
     if not meta or not meta['event_id']:
         from fastapi import HTTPException
