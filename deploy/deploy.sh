@@ -53,6 +53,11 @@ sudo systemctl daemon-reload
 sudo systemctl enable nomad-eye-backend nomad-eye-network
 sudo systemctl restart nomad-eye-backend nomad-eye-network
 
+# Grant service user permission to control Tailscale without root
+if command -v tailscale &>/dev/null; then
+    sudo tailscale set --operator=$USER
+fi
+
 # Configure nginx as reverse proxy
 sudo cp $REPO_DIR/deploy/nginx.conf /etc/nginx/sites-available/nomad-eye
 sudo ln -sf /etc/nginx/sites-available/nomad-eye /etc/nginx/sites-enabled/nomad-eye
