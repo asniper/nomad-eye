@@ -17,6 +17,11 @@ if [ "$ACTION" = "reboot" ]; then
     exit 0
 fi
 
+if [ "$ACTION" = "tailscale-set-operator" ]; then
+    tailscale set --operator=arduino
+    exit 0
+fi
+
 # All other actions require a valid device name
 if ! echo "$DEVICE" | grep -qE '^[a-z0-9]{1,32}$'; then
     echo "Invalid device name: $DEVICE" >&2

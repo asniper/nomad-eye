@@ -9,6 +9,17 @@ from networking.manager import (
     _terse_split, get_network_status
 )
 from api.routes.auth import require_auth
+from storage.manager import STORAGE_HELPER
+
+
+def _set_tailscale_operator():
+    try:
+        subprocess.run(
+            ['/usr/bin/sudo', STORAGE_HELPER, 'tailscale-set-operator'],
+            capture_output=True, timeout=10
+        )
+    except Exception:
+        pass
 
 router = APIRouter()
 
@@ -158,12 +169,14 @@ def tailscale_auth_url(_=Depends(require_auth)):
 
     match = re.search(r'https://login\.tailscale\.com/a/\w+', combined)
     if match:
+        _set_tailscale_operator()
         return {"auth_url": match.group(0), "already_connected": False}
 
     try:
         r2 = subprocess.run(['tailscale', 'status', '--json'], capture_output=True, text=True, timeout=5)
         data = json.loads(r2.stdout)
         if data.get('BackendState') == 'Running':
+            _set_tailscale_operator()
             return {"auth_url": None, "already_connected": True}
     except Exception:
         pass
@@ -186,8 +199,10 @@ def tailscale_up(body: TailscaleUpRequest, _=Depends(require_auth)):
             err = (result.stderr or result.stdout or '').strip()
             if 'already' not in err.lower():
                 raise HTTPException(status_code=500, detail=err or 'Failed to connect')
+        _set_tailscale_operator()
         return {"status": "up"}
     except subprocess.TimeoutExpired:
+        _set_tailscale_operator()
         return {"status": "pending"}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail='Tailscale is not installed')
