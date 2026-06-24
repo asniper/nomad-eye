@@ -605,7 +605,7 @@ class DetectionPipeline:
                     with self._clip_lock:
                         cam_writers = dict(self._clip_writers.get(cam.camera_id, {}))
                     for w in cam_writers.values():
-                        w.extend(frame)
+                        w.write_frame(frame)
             # ---
 
             if has_motion:
@@ -842,6 +842,11 @@ class DetectionPipeline:
             else:
                 ev['bbox'] = d.bbox
                 ev['last_seen'] = now
+                if self._clips_enabled:
+                    with self._clip_lock:
+                        w = self._clip_writers.get(cam.camera_id, {}).get(ev['event_id'])
+                    if w:
+                        w.touch()
             if now - ev['last_screenshot'] >= SCREENSHOT_INTERVAL:
                 screenshot_needed.append((d, ev))
         if screenshot_needed:

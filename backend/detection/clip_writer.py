@@ -68,12 +68,11 @@ class EventClipWriter:
         except Exception:
             pass
 
-    def extend(self, frame_bgr):
-        """Add a live frame and reset the post-roll timer."""
+    def write_frame(self, frame_bgr):
+        """Write a frame without resetting the post-roll timer."""
         with self._lock:
             if self._closed:
                 return
-            self._last_extend = time.time()
             try:
                 f = frame_bgr
                 if f.shape[:2] != (CLIP_HEIGHT, CLIP_WIDTH):
@@ -81,6 +80,17 @@ class EventClipWriter:
                 self._writer.write(f)
             except Exception:
                 pass
+
+    def touch(self):
+        """Reset the post-roll timer (called when a detection confirms event is still active)."""
+        with self._lock:
+            if not self._closed:
+                self._last_extend = time.time()
+
+    def extend(self, frame_bgr):
+        """Write a frame and reset the post-roll timer."""
+        self.write_frame(frame_bgr)
+        self.touch()
 
     def should_close(self, post_roll_secs: float) -> bool:
         if self._closed:
