@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
-import { settings, detections as detectionsApi, storage as storageApi, system as systemApi, cameras as camerasApi, faces as facesApi } from '../api/client'
+import { settings, detections as detectionsApi, storage as storageApi, system as systemApi, cameras as camerasApi, faces as facesApi, presence as presenceApi } from '../api/client'
 
 import { useAuth } from '../hooks/useAuth'
 import { useDeviceStatus } from '../context/DeviceStatusContext'
@@ -249,6 +249,8 @@ export default function Settings() {
         </div>
       </Card>
 
+      <PresenceCard allSettings={allSettings} saveSetting={saveSetting} saving={saving} saved={saved} />
+
       <Card title="SMS">
         <SettingRow label="Provider" hint="How SMS alerts are sent. Email Gateway is free but requires the recipient's carrier.">
           <div className="flex gap-2 flex-wrap">
@@ -360,6 +362,296 @@ export default function Settings() {
 
       </>}
     </div>
+  )
+}
+
+const STATUS_OPTIONS_PRESENCE = ['home', 'away', 'sleep', 'vacation']
+
+function PresenceCard({ allSettings, saveSetting, saving, saved }) {
+  const [devices, setDevices] = useState([])
+  const [addingDevice, setAddingDevice] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newMac, setNewMac] = useState('')
+  const [addError, setAddError] = useState(null)
+  const [addSaving, setAddSaving] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [scanResults, setScanResults] = useState(null)
+  const [scanError, setScanError] = useState(null)
+  const [deletingId, setDeletingId] = useState(null)
+
+  const enabled = (allSettings.presence_enabled ?? '0') === '1'
+  const timeout = allSettings.presence_timeout ?? '5'
+  const homeStatus = allSettings.presence_home_status ?? 'home'
+  const awayStatus = allSettings.presence_away_status ?? 'away'
+
+  const loadDevices = useCallback(() => {
+    presenceApi.listDevices().then(r => setDevices(r.data)).catch(() => {})
+  }, [])
+
+  useEffect(() => { loadDevices() }, [loadDevices])
+
+  const watchedMacs = new Set(devices.map(d => d.mac_address.toLowerCase()))
+
+  const handleAddDevice = async (e) => {
+    e.preventDefault()
+    setAddError(null)
+    setAddSaving(true)
+    try {
+      await presenceApi.addDevice({ name: newName.trim(), mac_address: newMac.trim() })
+      setNewName('')
+      setNewMac('')
+      setAddingDevice(false)
+      loadDevices()
+    } catch (err) {
+      setAddError(err?.response?.data?.detail || 'Failed to add device')
+    }
+    setAddSaving(false)
+  }
+
+  const handleDelete = async (id) => {
+    setDeletingId(id)
+    await presenceApi.deleteDevice(id).catch(() => {})
+    loadDevices()
+    setDeletingId(null)
+  }
+
+  const handleToggle = async (id, active) => {
+    setDevices(prev => prev.map(d => d.id === id ? { ...d, active: active ? 1 : 0 } : d))
+    await presenceApi.patchDevice(id, { active }).catch(() => loadDevices())
+  }
+
+  const handleScan = async () => {
+    setScanError(null)
+    setScanResults(null)
+    setScanning(true)
+    try {
+      const r = await presenceApi.scan()
+      setScanResults(r.data.devices)
+    } catch (err) {
+      setScanError(err?.response?.data?.detail || 'Scan failed')
+    }
+    setScanning(false)
+  }
+
+  const addFromScan = (device) => {
+    setNewMac(device.mac)
+    setNewName(device.vendor || '')
+    setAddingDevice(true)
+    setScanResults(null)
+  }
+
+  return (
+    <Card title="Presence Detection">
+      <p className="text-sm text-gray-400 mb-3">
+        Automatically change device status based on whether a phone or device is on the local network. Uses ARP scanning — no app required on the tracked device.
+      </p>
+
+      <div className="flex items-center justify-between py-3 border-b border-[#3A3A3A]">
+        <div>
+          <p className="text-sm font-medium text-white">Enable presence detection</p>
+          <p className="text-xs text-gray-500 mt-0.5">Scans network every 30 seconds</p>
+        </div>
+        <button
+          onClick={() => saveSetting('presence_enabled', enabled ? '0' : '1')}
+          className="relative w-11 h-6 rounded-full transition-colors shrink-0"
+          style={{ background: enabled ? '#FFB800' : '#3A3A3A' }}
+        >
+          <span
+            className="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all"
+            style={{ left: enabled ? '1.375rem' : '0.25rem' }}
+          />
+        </button>
+      </div>
+
+      <div className={enabled ? '' : 'opacity-40 pointer-events-none select-none'}>
+        <div className="py-3 border-b border-[#3A3A3A] flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
+          <div className="sm:w-44 shrink-0">
+            <p className="text-sm font-medium text-white">Away timeout</p>
+            <p className="text-xs text-gray-500 mt-0.5">Minutes without a ping before switching to away</p>
+          </div>
+          <div className="flex gap-1.5 flex-wrap">
+            {['2', '5', '10', '15', '30'].map(v => (
+              <button key={v}
+                onClick={() => saveSetting('presence_timeout', v)}
+                className="px-3 py-1 rounded-md text-xs font-medium transition-opacity hover:opacity-80"
+                style={timeout === v ? { background: '#FFB800', color: '#151925' } : { background: '#3A3A3A', color: '#9CA3AF' }}
+              >{v} min</button>
+            ))}
+            {saved.presence_timeout && <span className="text-xs text-green-400 self-center">Saved ✓</span>}
+          </div>
+        </div>
+
+        <div className="py-3 border-b border-[#3A3A3A] flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-6">
+          <div className="sm:w-44 shrink-0">
+            <p className="text-sm font-medium text-white">Status mapping</p>
+            <p className="text-xs text-gray-500 mt-0.5">What to set when detected / not detected</p>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-gray-400 w-24 shrink-0">Detected →</span>
+              <div className="flex gap-1.5 flex-wrap">
+                {STATUS_OPTIONS_PRESENCE.map(s => (
+                  <button key={s}
+                    onClick={() => saveSetting('presence_home_status', s)}
+                    className="px-2.5 py-1 rounded-md text-xs font-medium capitalize transition-opacity hover:opacity-80"
+                    style={homeStatus === s ? { background: '#FFB800', color: '#151925' } : { background: '#3A3A3A', color: '#9CA3AF' }}
+                  >{s}</button>
+                ))}
+                {saved.presence_home_status && <span className="text-xs text-green-400 self-center">Saved ✓</span>}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-gray-400 w-24 shrink-0">Not detected →</span>
+              <div className="flex gap-1.5 flex-wrap">
+                {STATUS_OPTIONS_PRESENCE.map(s => (
+                  <button key={s}
+                    onClick={() => saveSetting('presence_away_status', s)}
+                    className="px-2.5 py-1 rounded-md text-xs font-medium capitalize transition-opacity hover:opacity-80"
+                    style={awayStatus === s ? { background: '#FFB800', color: '#151925' } : { background: '#3A3A3A', color: '#9CA3AF' }}
+                  >{s}</button>
+                ))}
+                {saved.presence_away_status && <span className="text-xs text-green-400 self-center">Saved ✓</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="py-3 border-b border-[#3A3A3A]">
+          <p className="text-sm font-medium text-white mb-2">Watched devices</p>
+          {devices.length === 0 && !addingDevice && (
+            <p className="text-xs text-gray-500 mb-2">No devices watched. Add a device below or scan the network to discover devices.</p>
+          )}
+          {devices.length > 0 && (
+            <div className="space-y-0 mb-2">
+              {devices.map(d => (
+                <div key={d.id} className="flex items-center gap-3 py-2 border-b border-[#2A2A2A] last:border-0" style={{ opacity: d.active ? 1 : 0.5 }}>
+                  <button
+                    onClick={() => handleToggle(d.id, !d.active)}
+                    className="relative shrink-0 rounded-full transition-colors"
+                    style={{ width: 34, height: 18, background: d.active ? '#FFB800' : '#484848' }}
+                  >
+                    <div className="absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all" style={{ left: d.active ? 16 : 2 }} />
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white">{d.name}</p>
+                    <p className="text-xs font-mono text-gray-500">{d.mac_address}</p>
+                  </div>
+                  {d.last_seen && (
+                    <span className="text-xs text-gray-600 shrink-0 hidden sm:block">
+                      {new Date(d.last_seen).toLocaleTimeString()}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => handleDelete(d.id)}
+                    disabled={deletingId === d.id}
+                    className="text-xs text-red-400 hover:text-red-300 transition-colors shrink-0 disabled:opacity-50"
+                  >
+                    {deletingId === d.id ? '…' : 'Remove'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {addingDevice ? (
+            <form onSubmit={handleAddDevice} className="space-y-2 pt-2">
+              <div className="flex gap-2 flex-wrap">
+                <input
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  placeholder="Device name (e.g. Casey's iPhone)"
+                  required
+                  className="flex-1 min-w-36 bg-[#3A3A3A] border border-[#484848] rounded-md px-3 py-1.5 text-sm text-white focus:outline-none"
+                  onFocus={e => e.target.style.borderColor = '#4c6e5d'}
+                  onBlur={e => e.target.style.borderColor = '#484848'}
+                />
+                <input
+                  value={newMac}
+                  onChange={e => setNewMac(e.target.value)}
+                  placeholder="aa:bb:cc:dd:ee:ff"
+                  required
+                  className="flex-1 min-w-36 bg-[#3A3A3A] border border-[#484848] rounded-md px-3 py-1.5 text-sm font-mono text-white focus:outline-none"
+                  onFocus={e => e.target.style.borderColor = '#4c6e5d'}
+                  onBlur={e => e.target.style.borderColor = '#484848'}
+                />
+              </div>
+              {addError && <p className="text-xs text-red-400">{addError}</p>}
+              <div className="flex gap-2">
+                <button type="submit" disabled={addSaving}
+                  className="px-3 py-1.5 rounded-md text-sm font-medium disabled:opacity-50 hover:opacity-90"
+                  style={{ background: '#FFB800', color: '#151925' }}>
+                  {addSaving ? 'Saving…' : 'Add Device'}
+                </button>
+                <button type="button" onClick={() => { setAddingDevice(false); setAddError(null); setNewName(''); setNewMac('') }}
+                  className="px-3 py-1.5 bg-[#3A3A3A] hover:bg-[#484848] text-white text-sm rounded-md transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : (
+            <button onClick={() => setAddingDevice(true)}
+              className="mt-1 px-3 py-1.5 bg-[#3A3A3A] hover:bg-[#484848] text-white text-sm rounded-md transition-colors">
+              + Add device manually
+            </button>
+          )}
+        </div>
+
+        <div className="pt-3">
+          <div className="flex items-center gap-3 mb-2">
+            <p className="text-sm font-medium text-white">Discover devices</p>
+            <button
+              onClick={handleScan}
+              disabled={scanning}
+              className="px-3 py-1 text-xs rounded-md transition-colors disabled:opacity-50"
+              style={{ background: '#3A3A3A', color: '#9CA3AF' }}
+            >
+              {scanning ? 'Scanning…' : 'Scan network'}
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mb-2">Scans the local network and shows all connected devices. Click any device to add it to your watch list.</p>
+          {scanError && <p className="text-xs text-red-400 mb-2">{scanError}</p>}
+          {scanResults !== null && (
+            scanResults.length === 0
+              ? <p className="text-xs text-gray-500">No devices found.</p>
+              : (
+                <div className="rounded-lg overflow-hidden border border-[#3A3A3A]">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-[#3A3A3A]">
+                        <th className="text-left px-3 py-2 text-gray-500 font-medium">IP</th>
+                        <th className="text-left px-3 py-2 text-gray-500 font-medium">MAC</th>
+                        <th className="text-left px-3 py-2 text-gray-500 font-medium hidden sm:table-cell">Vendor</th>
+                        <th className="px-3 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#2A2A2A]">
+                      {scanResults.map((d, i) => {
+                        const isWatched = watchedMacs.has(d.mac.toLowerCase())
+                        return (
+                          <tr key={i} className="hover:bg-[#252525] transition-colors">
+                            <td className="px-3 py-2 font-mono text-gray-300">{d.ip}</td>
+                            <td className="px-3 py-2 font-mono text-gray-400">{d.mac}</td>
+                            <td className="px-3 py-2 text-gray-500 hidden sm:table-cell truncate max-w-[160px]">{d.vendor || '—'}</td>
+                            <td className="px-3 py-2 text-right">
+                              {isWatched
+                                ? <span className="text-green-400">Watching</span>
+                                : <button
+                                    onClick={() => addFromScan(d)}
+                                    className="text-[#FFB800] hover:opacity-80 transition-opacity"
+                                  >Add</button>
+                              }
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )
+          )}
+        </div>
+      </div>
+    </Card>
   )
 }
 

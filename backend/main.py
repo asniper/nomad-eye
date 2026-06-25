@@ -35,7 +35,9 @@ from api.routes import system
 from api.routes.system import start_auto_update_scheduler
 from api.routes import faces as faces_router
 from api.routes import faces
+from api.routes import presence as presence_router
 from storage.manager import auto_mount_primary
+from detection.presence import PresenceScanner
 
 
 @asynccontextmanager
@@ -138,6 +140,10 @@ async def lifespan(app: FastAPI):
     queue_proc = QueueProcessor()
     queue_proc.start()
 
+    presence_scanner = PresenceScanner()
+    presence_scanner.start()
+    presence_router.set_scanner(presence_scanner)
+
     # Mount primary external storage device if configured
     auto_mount_primary()
 
@@ -161,6 +167,7 @@ async def lifespan(app: FastAPI):
     scan_task.cancel()
     pipeline.stop()
     queue_proc.stop()
+    presence_scanner.stop()
     for cap in list(pipeline._cameras):
         cap.stop()
 
@@ -187,6 +194,7 @@ app.include_router(setup.router, prefix="/api/setup", tags=["setup"])
 app.include_router(storage.router, prefix="/api/storage", tags=["storage"])
 app.include_router(system.router, prefix="/api/system", tags=["system"])
 app.include_router(faces.router, prefix="/api/faces", tags=["faces"])
+app.include_router(presence_router.router, prefix="/api/presence", tags=["presence"])
 
 @app.get("/api/health")
 def health():

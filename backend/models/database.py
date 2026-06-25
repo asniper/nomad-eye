@@ -97,6 +97,14 @@ def init_db():
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS presence_devices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            mac_address TEXT NOT NULL UNIQUE,
+            active INTEGER DEFAULT 1,
+            last_seen TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS notification_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp TEXT NOT NULL,
@@ -192,6 +200,10 @@ def init_db():
         ('ntfy_server',              'https://ntfy.sh'),
         ('ntfy_token',               ''),
         ('ntfy_enabled',             '1'),
+        ('presence_enabled',         '0'),
+        ('presence_timeout',         '5'),
+        ('presence_home_status',     'home'),
+        ('presence_away_status',     'away'),
     ]
     for key, value in defaults:
         db.execute(

@@ -9,11 +9,13 @@ All Nomad Eye settings are managed through the web UI and stored as key-value pa
 | Location | What you can configure |
 |---|---|
 | Settings → General | AI model, detection confidence, motion threshold, categories, clip length, timezone |
+| Settings → General → Presence Detection | Network presence scanning, watched devices, away timeout, status mapping |
+| Settings → General → ntfy Push Notifications | ntfy server URL, access token, enable/disable |
 | Settings → Faces | Face recognition enable/disable, face library management |
 | Settings → Network | WiFi networks, hotspot mode, Tailscale, external access URL |
 | Settings → Storage | Primary storage location, external drive management, purge old data |
 | Settings → System | Timezone, admin password, OTA update channel and auto-update |
-| Settings → Notifications | Twilio SMS, SMTP email, contacts, notification rules |
+| Notifications | ntfy, SMS, email contacts, notification rules, delivery log |
 
 ---
 
@@ -57,6 +59,13 @@ sqlite3 /opt/nomad-eye/data/db/nomadeye.db "SELECT key, value FROM app_config;"
 | `update_channel` | `releases` (stable tags) or `main` (latest commit) |
 | `auto_update_enabled` | `1` / `0` — daily auto-update check at 3 AM |
 | `timezone` | IANA timezone string (e.g. `America/Denver`) |
+| `ntfy_server` | ntfy server base URL (default: `https://ntfy.sh`) |
+| `ntfy_token` | Optional ntfy access token for private topics |
+| `ntfy_enabled` | `1` / `0` — global ntfy on/off switch |
+| `presence_enabled` | `1` / `0` — enable network presence detection |
+| `presence_timeout` | Minutes without a ping before switching to away status (default `5`) |
+| `presence_home_status` | Status to set when a watched device is detected (default `home`) |
+| `presence_away_status` | Status to set when no watched device is detected (default `away`) |
 
 ---
 

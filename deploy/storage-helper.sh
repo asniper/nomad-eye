@@ -22,6 +22,11 @@ if [ "$ACTION" = "tailscale-set-operator" ]; then
     exit 0
 fi
 
+if [ "$ACTION" = "arp-scan" ]; then
+    arp-scan --localnet 2>/dev/null || true
+    exit 0
+fi
+
 # All other actions require a valid device name
 if ! echo "$DEVICE" | grep -qE '^[a-z0-9]{1,32}$'; then
     echo "Invalid device name: $DEVICE" >&2

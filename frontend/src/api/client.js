@@ -105,6 +105,15 @@ export const faces = {
   backend: () => api.get('/faces/backend'),
 }
 
+export const presence = {
+  listDevices: () => api.get('/presence/devices'),
+  addDevice: (data) => api.post('/presence/devices', data),
+  patchDevice: (id, data) => api.patch(`/presence/devices/${id}`, data),
+  deleteDevice: (id) => api.delete(`/presence/devices/${id}`),
+  scan: () => api.get('/presence/scan'),
+  status: () => api.get('/presence/status'),
+}
+
 export const storage = {
   devices: () => api.get('/storage/devices'),
   mount: (device) => api.post(`/storage/devices/${device}/mount`),

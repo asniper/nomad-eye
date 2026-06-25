@@ -13,6 +13,7 @@ Self-hosted AI security camera system — runs entirely on-device, no cloud requ
 - **Live MJPEG streams** — real-time video with motion and detection overlay
 - **Detection events** — saves image snapshots and H.264 video clips (pre-roll + post-roll) locally; watch clips inline or download from the event detail page
 - **Notifications** — push via ntfy (free, no account needed), SMS via Twilio or carrier email gateway, email via SMTP; rule-based by category, time window, and frequency
+- **Presence detection** — automatically switch device status based on whether your phone is on the local network (ARP-based, no app required)
 - **WiFi management** — scan, connect, and forget networks from the UI; captive portal hotspot for initial setup
 - **Tailscale remote access** — in-app setup flow with node sharing guide
 - **External storage** — mount, format, and set primary USB drives or SD cards
@@ -77,7 +78,8 @@ Full documentation lives in the [project wiki](../../wiki):
 | [Camera Setup](../../wiki/Camera-Setup) | USB cameras, bandwidth, enabling/disabling |
 | [AI Detection](../../wiki/AI-Detection) | Models, thresholds, open-vocab classes |
 | [Face Recognition](../../wiki/Face-Recognition) | Face library, merging, performance |
-| [Notifications](../../wiki/Notifications) | Twilio SMS, SMTP email, rules |
+| [Notifications](../../wiki/Notifications) | ntfy, SMS, email, rules |
+| [Presence Detection](../../wiki/Presence) | Auto status via network device detection |
 | [Remote Access](../../wiki/Remote-Access) | Tailscale setup and node sharing |
 | [Storage](../../wiki/Storage) | USB drives, formatting, purging |
 | [OTA Updates](../../wiki/OTA-Updates) | Update channels, auto-update |
