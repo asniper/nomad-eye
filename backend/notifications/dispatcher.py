@@ -91,6 +91,9 @@ async def dispatch_notification(camera_id: int, detections: list, image_path: st
     tz_row = db.execute("SELECT value FROM app_config WHERE key='timezone'").fetchone()
     tz_name = tz_row["value"] if tz_row else "UTC"
 
+    ntfy_enabled_row = db.execute("SELECT value FROM app_config WHERE key='ntfy_enabled'").fetchone()
+    ntfy_enabled = (ntfy_enabled_row["value"] if ntfy_enabled_row else "1") != "0"
+
     time_str = _format_ts(ts, tz_name)
     event_link = f"{notification_url}/events/{event_id}" if event_id else None
 
@@ -101,6 +104,9 @@ async def dispatch_notification(camera_id: int, detections: list, image_path: st
     now_dt = datetime.now(timezone.utc)
 
     for contact in contacts:
+        if contact["type"] == "ntfy" and not ntfy_enabled:
+            continue
+
         rules = db.execute(
             "SELECT * FROM notification_rules WHERE contact_id = ? AND active = 1",
             (contact["id"],)

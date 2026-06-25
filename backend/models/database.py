@@ -191,6 +191,7 @@ def init_db():
         ('clips_primary_device',     ''),
         ('ntfy_server',              'https://ntfy.sh'),
         ('ntfy_token',               ''),
+        ('ntfy_enabled',             '1'),
     ]
     for key, value in defaults:
         db.execute(

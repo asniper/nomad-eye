@@ -104,6 +104,8 @@ def _process_due_items():
     base_url = ext_row["value"].rstrip("/") if (ext_row and ext_row["value"]) else internal_url
     tz_row = db.execute("SELECT value FROM app_config WHERE key='timezone'").fetchone()
     tz_name = tz_row["value"] if tz_row else "UTC"
+    ntfy_enabled_row = db.execute("SELECT value FROM app_config WHERE key='ntfy_enabled'").fetchone()
+    ntfy_enabled = (ntfy_enabled_row["value"] if ntfy_enabled_row else "1") != "0"
 
     for item in pending:
         subject, message, log_labels, log_event_id = _build_message(item, base_url, tz_name)
@@ -128,8 +130,11 @@ def _process_due_items():
             elif item["channel"] == "email":
                 asyncio.run(send_email(item["address"], subject, message, image_paths))
             elif item["channel"] == "ntfy":
-                click_url = f"{base_url}/events/{log_event_id}" if (base_url and log_event_id) else None
-                asyncio.run(send_ntfy(item["address"], message, title=subject, click_url=click_url))
+                if not ntfy_enabled:
+                    status = "skipped"
+                else:
+                    click_url = f"{base_url}/events/{log_event_id}" if (base_url and log_event_id) else None
+                    asyncio.run(send_ntfy(item["address"], message, title=subject, click_url=click_url))
         except Exception as exc:
             status = "failed"
             err = str(exc)

@@ -304,12 +304,47 @@ export default function Settings() {
       </Card>
 
       <Card title="ntfy Push Notifications">
-        <SettingRow label="Server URL" hint="ntfy.sh (cloud, free) or your self-hosted ntfy server URL.">
-          <TextInput keyName="ntfy_server" current={allSettings.ntfy_server ?? 'https://ntfy.sh'} onSave={saveSetting} saving={saving.ntfy_server} saved={saved.ntfy_server} error={errors.ntfy_server} placeholder="https://ntfy.sh" />
-        </SettingRow>
-        <SettingRow label="Access Token" hint="Optional. Required only for private topics or authenticated self-hosted servers.">
-          <TextInput keyName="ntfy_token" current={allSettings.ntfy_token ?? ''} onSave={saveSetting} saving={saving.ntfy_token} saved={saved.ntfy_token} error={errors.ntfy_token} placeholder="tk_..." secret />
-        </SettingRow>
+        <div className="flex items-center justify-between py-3 mb-2 border-b border-[#3A3A3A]">
+          <div>
+            <p className="text-sm font-medium text-white">Enable ntfy notifications</p>
+            <p className="text-xs text-gray-500 mt-0.5">Globally pause all ntfy alerts without removing contacts or rules.</p>
+          </div>
+          <button
+            onClick={() => saveSetting('ntfy_enabled', (allSettings.ntfy_enabled ?? '1') === '0' ? '1' : '0')}
+            className="relative w-11 h-6 rounded-full transition-colors shrink-0"
+            style={{ background: (allSettings.ntfy_enabled ?? '1') !== '0' ? '#FFB800' : '#3A3A3A' }}
+          >
+            <span
+              className="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all"
+              style={{ left: (allSettings.ntfy_enabled ?? '1') !== '0' ? '1.375rem' : '0.25rem' }}
+            />
+          </button>
+        </div>
+        <div className={(allSettings.ntfy_enabled ?? '1') === '0' ? 'opacity-40 pointer-events-none select-none' : ''}>
+          <SettingRow label="Server URL" hint="ntfy.sh (cloud, free) or your self-hosted ntfy server URL.">
+            <TextInput keyName="ntfy_server" current={allSettings.ntfy_server ?? 'https://ntfy.sh'} onSave={saveSetting} saving={saving.ntfy_server} saved={saved.ntfy_server} error={errors.ntfy_server} placeholder="https://ntfy.sh" />
+          </SettingRow>
+          <SettingRow label="Access Token" hint="Optional. Required only for private topics or authenticated self-hosted servers.">
+            <TextInput keyName="ntfy_token" current={allSettings.ntfy_token ?? ''} onSave={saveSetting} saving={saving.ntfy_token} saved={saved.ntfy_token} error={errors.ntfy_token} placeholder="tk_..." secret />
+          </SettingRow>
+        </div>
+        <div className="mt-4 pt-4 border-t border-[#3A3A3A]">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Setup Guide</p>
+          <ol className="space-y-3">
+            {[
+              { n: 1, text: <span>Download the <strong className="text-white">ntfy</strong> app — search <span className="font-mono text-gray-300">ntfy</span> in the App Store (iOS) or Play Store (Android). Free and open source.</span> },
+              { n: 2, text: <span>In the app, tap <strong className="text-white">+</strong> and subscribe to a topic name you choose — e.g. <span className="font-mono text-gray-300">my-home-alerts</span>. A topic is like a private channel; pick something unique so only you know it.</span> },
+              { n: 3, text: <span>Go to <strong className="text-white">Notifications → Contacts → Add Contact</strong>, set type to <strong className="text-white">ntfy</strong>, and enter your topic name.</span> },
+              { n: 4, text: <span>Add a <strong className="text-white">Notification Rule</strong> for that contact to control which detections trigger an alert and when.</span> },
+            ].map(({ n, text }) => (
+              <li key={n} className="flex items-start gap-2.5 text-sm text-gray-400">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-[#3A3A3A] text-xs text-gray-300 flex items-center justify-center mt-0.5">{n}</span>
+                <span>{text}</span>
+              </li>
+            ))}
+          </ol>
+          <p className="text-xs text-gray-600 mt-3">No account needed for public topics on ntfy.sh. For private topics, create a free account at ntfy.sh and paste your access token above.</p>
+        </div>
       </Card>
 
       <Card title="Account">
