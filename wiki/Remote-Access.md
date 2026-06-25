@@ -27,7 +27,7 @@ Nomad Eye includes an in-app Tailscale setup flow.
 3. Authorize the device in the Tailscale admin console
 4. The device will appear as connected in the UI with its Tailscale IP and MagicDNS hostname
 
-On successful connect, Nomad Eye automatically grants the `arduino` service user operator permissions (`tailscale set --operator=arduino`). This allows in-app disconnect and logout to work without requiring root access.
+On successful connect, Nomad Eye automatically grants the `nomadeye` service user operator permissions (`tailscale set --operator=nomadeye`). This allows in-app disconnect and logout to work without requiring root access.
 
 ---
 
@@ -83,7 +83,7 @@ Shared users can access `http://<tailscale-ip>:8000` using the web UI login. The
 
 **Settings → Remote Access → Tailscale → Logout** — fully removes the device from your tailnet. You'll need to re-authenticate via the browser flow or an auth key to reconnect.
 
-Both operations run as the `arduino` user without root because Nomad Eye sets the Tailscale operator on connect.
+Both operations run as the `nomadeye` user without root because Nomad Eye sets the Tailscale operator on connect.
 
 ---
 

@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sqlite3
 from pathlib import Path
@@ -6,8 +7,12 @@ from config.settings import get_settings
 
 cfg = get_settings()
 
-INTERNAL_IMAGES_DIR = "/home/arduino/nomadeye-data/images"
-STORAGE_HELPER = "/opt/nomad-eye/storage-helper.sh"
+_PROJECT_ROOT = Path(__file__).parent.parent.parent  # backend/storage/manager.py → /opt/nomad-eye
+INTERNAL_IMAGES_DIR = os.environ.get(
+    'NOMADEYE_DATA_DIR',
+    str(_PROJECT_ROOT / 'data' / 'images')
+)
+STORAGE_HELPER = str(_PROJECT_ROOT / 'storage-helper.sh')
 
 
 def get_active_clips_dir() -> str | None:

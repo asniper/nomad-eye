@@ -75,7 +75,7 @@ See [Notifications](Notifications.md) for rule setup.
 
 **Scan returns no devices**
 - Ensure `arp-scan` is installed: `apt install arp-scan`
-- The service runs as the `arduino` user — `arp-scan` requires root and is called via the `storage-helper.sh` sudo wrapper. Check that the wrapper is in place: `ls -la /opt/nomad-eye/storage-helper.sh`
+- The service runs as the `nomadeye` user — `arp-scan` requires root and is called via the `storage-helper.sh` sudo wrapper. Check that the wrapper is in place: `ls -la /opt/nomad-eye/storage-helper.sh`
 
 **Status not changing**
 - Confirm presence detection is enabled in Settings → General.

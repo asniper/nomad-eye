@@ -1,4 +1,5 @@
 import concurrent.futures
+import os
 import re
 import socket
 import sqlite3
@@ -6,9 +7,12 @@ import subprocess
 import threading
 import time
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from config.settings import get_settings
 
 cfg = get_settings()
+
+_STORAGE_HELPER = str(Path(__file__).parent.parent.parent / 'storage-helper.sh')
 
 # Matches: "192.168.0.1\taa:bb:cc:dd:ee:ff\tVendor Name"
 _ARP_RE = re.compile(r'^(\d{1,3}(?:\.\d{1,3}){3})\s+([\da-fA-F]{2}(?::[\da-fA-F]{2}){5})\s*(.*)')
@@ -43,7 +47,7 @@ def run_arp_scan():
     """Run arp-scan via storage-helper. Returns list of {ip, mac, vendor, hostname?} or None on error."""
     try:
         result = subprocess.run(
-            ['sudo', '/opt/nomad-eye/storage-helper.sh', 'arp-scan'],
+            ['sudo', _STORAGE_HELPER, 'arp-scan'],
             capture_output=True, text=True, timeout=30
         )
         if result.returncode != 0:

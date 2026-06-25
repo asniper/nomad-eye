@@ -135,7 +135,7 @@ journalctl -u nomad-eye-backend -n 200 --no-pager
 | `No such file or directory: backend/venv` | venv not created | Run `python3 -m venv /opt/nomad-eye/backend/venv && /opt/nomad-eye/backend/venv/bin/pip install -r /opt/nomad-eye/backend/requirements.txt` |
 | `ModuleNotFoundError` | pip install incomplete | Re-run pip install in the venv |
 | `Address already in use` | Port 80 is occupied | `sudo lsof -i ` to find the conflicting process |
-| `Permission denied` on data dir | Data directories owned by wrong user | `sudo chown -R arduino:arduino /opt/nomad-eye/data` |
+| `Permission denied` on data dir | Data directories owned by wrong user | `sudo chown -R nomadeye:nomadeye /opt/nomad-eye/data` |
 | `.env` parse error | Malformed .env file | Check `/opt/nomad-eye/.env` for syntax errors |
 
 **Restart the service after fixing:**
@@ -168,10 +168,10 @@ sudo tailscale up
 
 ## Update fails
 
-**git credentials / permission error.** The service runs as the `arduino` user. If `/opt/nomad-eye` is owned by `root`, git pull will fail.
+**git credentials / permission error.** The service runs as the `nomadeye` user. If `/opt/nomad-eye` is owned by `root`, git pull will fail.
 
 ```bash
-sudo chown -R arduino:arduino /opt/nomad-eye
+sudo chown -R nomadeye:nomadeye /opt/nomad-eye
 ```
 
 **npm not installed.** If the frontend build step fails, verify npm is available:
@@ -198,7 +198,7 @@ Purge old detections (**Storage → Purge**) to free space, then retry the updat
 
 ```bash
 cd /opt/nomad-eye
-sudo -u arduino git pull
-sudo -u arduino bash -c 'cd frontend && npm install && npm run build'
+sudo -u nomadeye git pull
+sudo -u nomadeye bash -c 'cd frontend && npm install && npm run build'
 sudo systemctl restart nomad-eye-backend
 ```

@@ -5,6 +5,7 @@ import subprocess
 import threading
 import time
 import psutil
+from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from api.routes.auth import require_auth
 from config.settings import get_settings
@@ -13,7 +14,8 @@ router = APIRouter()
 
 REPO_OWNER = 'asniper'
 REPO_NAME = 'nomad-eye'
-PROJECT_PATH = '/opt/nomad-eye'
+PROJECT_PATH = str(Path(__file__).parent.parent.parent.parent)  # routes/system.py → /opt/nomad-eye
+_STORAGE_HELPER = str(Path(PROJECT_PATH) / 'storage-helper.sh')
 
 _update_lock = threading.Lock()
 _update_status = {"in_progress": False, "last_result": None}
@@ -125,7 +127,7 @@ def perform_update(channel: str):
         _update_lock.release()
     time.sleep(2)
     subprocess.Popen(
-        ['/usr/bin/sudo', '/opt/nomad-eye/storage-helper.sh', 'restart'],
+        ['/usr/bin/sudo', _STORAGE_HELPER, 'restart'],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
 

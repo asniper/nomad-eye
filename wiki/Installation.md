@@ -104,12 +104,26 @@ sudo systemctl start nomad-eye-backend
 
 ---
 
+## Service User
+
+The app runs as a dedicated `nomadeye` system user with no general sudo access. This user must exist on the device before the services start. The deploy script creates it automatically. For manual installs:
+
+```bash
+sudo useradd -m -s /bin/bash \
+    -G video,audio,dialout,input,render,netdev,bluetooth,gpiod,adm \
+    nomadeye
+sudo chown -R nomadeye:nomadeye /opt/nomad-eye
+```
+
+The `video` group is required for camera device access (`/dev/video*`).
+
 ## Sudo Helper Setup
 
-The storage and network management features require the `arduino` service user to run a specific helper script with elevated privileges. Add the following line to `/etc/sudoers` (use `visudo` to edit safely):
+Storage and network management features require `nomadeye` to run a privileged helper script. Add these lines to `/etc/sudoers.d/nomadeye` (mode 0440):
 
 ```
-arduino ALL=(ALL) NOPASSWD: /opt/nomad-eye/deploy/storage-helper.sh
+nomadeye ALL=(ALL) NOPASSWD: /opt/nomad-eye/storage-helper.sh
+nomadeye ALL=(ALL) NOPASSWD: /usr/bin/timedatectl
 ```
 
 The helper script handles: service restart, device reboot, mounting/unmounting storage devices, and formatting drives as ext4. It does not grant general sudo access.

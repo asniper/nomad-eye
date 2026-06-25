@@ -52,7 +52,7 @@ The full system — backend, frontend, and AI — runs as a single systemd servi
 | Repo | github.com/asniper/nomad-eye |
 | Install path | `/opt/nomad-eye/` |
 | Service name | `nomad-eye-backend.service` |
-| Service user | `arduino` |
+| Service user | `nomadeye` |
 | Backend port | `80` (standard HTTP) |
 | Default credentials | `admin` / `nomadeye` |
 | License | MIT |

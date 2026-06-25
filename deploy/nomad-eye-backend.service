@@ -3,9 +3,10 @@ Description=Nomad Eye Backend
 After=network.target
 
 [Service]
-User=arduino
+User=nomadeye
 WorkingDirectory=/opt/nomad-eye/backend
 Environment=PATH=/opt/nomad-eye/backend/venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=NOMADEYE_DATA_DIR=/home/arduino/nomadeye-data/images
 ExecStart=/opt/nomad-eye/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8080 --loop uvloop
 Restart=always
 RestartSec=5
