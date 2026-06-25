@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import urllib.request
 import urllib.error
@@ -16,29 +17,29 @@ _CATEGORY_PRIORITY = {
 
 
 async def send_ntfy(topic: str, message: str, title: str = 'Nomad Eye Alert',
-                    click_url: str = None, category: str = None):
-    """POST a notification to an ntfy topic.
+                    click_url: str = None, category: str = None, image_path: str = None):
+    """POST or PUT a notification to an ntfy topic.
 
-    Reads ntfy_server and ntfy_token from app_config.
-    ntfy_server defaults to https://ntfy.sh.
-    ntfy_token is an optional Bearer token for private topics or self-hosted servers.
+    If image_path is provided and ntfy_send_images is enabled, attaches the image
+    via PUT (binary body, message in header). Otherwise POSTs plain text.
     """
     db = sqlite3.connect(cfg.db_path)
     db.row_factory = sqlite3.Row
     rows = db.execute(
-        "SELECT key, value FROM app_config WHERE key IN ('ntfy_server', 'ntfy_token')"
+        "SELECT key, value FROM app_config WHERE key IN "
+        "('ntfy_server', 'ntfy_token', 'ntfy_send_images')"
     ).fetchall()
     db.close()
     vals = {r['key']: r['value'] for r in rows}
 
     server = (vals.get('ntfy_server') or 'https://ntfy.sh').rstrip('/')
     token = vals.get('ntfy_token') or None
+    send_images = vals.get('ntfy_send_images', '1') != '0'
 
     priority = _CATEGORY_PRIORITY.get(category or '', 3)
     url = f'{server}/{topic}'
 
     headers = {
-        'Content-Type': 'text/plain; charset=utf-8',
         'Title': title,
         'Priority': str(priority),
     }
@@ -47,10 +48,31 @@ async def send_ntfy(topic: str, message: str, title: str = 'Nomad Eye Alert',
     if token:
         headers['Authorization'] = f'Bearer {token}'
 
-    data = message.encode('utf-8')
-    req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+    # Attach image via PUT if available and enabled
+    img_data = None
+    if send_images and image_path:
+        try:
+            with open(image_path, 'rb') as f:
+                img_data = f.read()
+        except (IOError, OSError):
+            img_data = None
+
+    if img_data:
+        ext = os.path.splitext(image_path)[1].lower()
+        content_type = 'image/png' if ext == '.png' else 'image/jpeg'
+        headers['Content-Type'] = content_type
+        headers['Filename'] = 'detection' + ext
+        headers['Message'] = message
+        data = img_data
+        method = 'PUT'
+    else:
+        headers['Content-Type'] = 'text/plain; charset=utf-8'
+        data = message.encode('utf-8')
+        method = 'POST'
+
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             if resp.status >= 400:
                 raise ValueError(f'ntfy returned HTTP {resp.status}')
     except urllib.error.HTTPError as exc:

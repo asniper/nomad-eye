@@ -329,6 +329,18 @@ export default function Settings() {
           <SettingRow label="Access Token" hint="Optional. Required only for private topics or authenticated self-hosted servers.">
             <TextInput keyName="ntfy_token" current={allSettings.ntfy_token ?? ''} onSave={saveSetting} saving={saving.ntfy_token} saved={saved.ntfy_token} error={errors.ntfy_token} placeholder="tk_..." secret />
           </SettingRow>
+          <SettingRow label="Send images" hint="Attach the detection snapshot to each ntfy notification. Disable for privacy on public topics.">
+            <button
+              onClick={() => saveSetting('ntfy_send_images', (allSettings.ntfy_send_images ?? '1') === '0' ? '1' : '0')}
+              className="relative w-11 h-6 rounded-full transition-colors shrink-0"
+              style={{ background: (allSettings.ntfy_send_images ?? '1') !== '0' ? '#FFB800' : '#3A3A3A' }}
+            >
+              <span
+                className="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all"
+                style={{ left: (allSettings.ntfy_send_images ?? '1') !== '0' ? '1.375rem' : '0.25rem' }}
+              />
+            </button>
+          </SettingRow>
         </div>
         <div className="mt-4 pt-4 border-t border-[#3A3A3A]">
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Setup Guide</p>

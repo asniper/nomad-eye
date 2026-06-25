@@ -200,6 +200,7 @@ def init_db():
         ('ntfy_server',              'https://ntfy.sh'),
         ('ntfy_token',               ''),
         ('ntfy_enabled',             '1'),
+        ('ntfy_send_images',         '1'),
         ('presence_enabled',         '0'),
         ('presence_timeout',         '5'),
         ('presence_home_status',     'home'),

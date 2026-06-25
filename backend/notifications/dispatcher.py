@@ -60,7 +60,8 @@ async def _send_contact(contact, message, labels, image_path, click_url=None, pr
     elif contact["type"] == "ntfy":
         from notifications.ntfy import send_ntfy
         await send_ntfy(contact["address"], message, title=f"Nomad Eye: {labels}",
-                        click_url=click_url, category=primary_category)
+                        click_url=click_url, category=primary_category,
+                        image_path=image_path)
 
 
 def _parse_last_notified(last_str):
@@ -190,7 +191,7 @@ async def dispatch_notification(camera_id: int, detections: list, image_path: st
                         "camera_id": camera_id,
                         "camera_name": camera_name,
                         "timestamp": ts,
-                        "image_path": image_path if contact["type"] == "email" else None,
+                        "image_path": image_path if contact["type"] in ("email", "ntfy") else None,
                     }
                     q_db = sqlite3.connect(cfg.db_path)
                     q_db.row_factory = sqlite3.Row

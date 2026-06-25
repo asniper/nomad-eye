@@ -133,8 +133,16 @@ def _process_due_items():
                 if not ntfy_enabled:
                     status = "skipped"
                 else:
+                    ntfy_image = None
+                    try:
+                        events = json.loads(item["events_json"] or "[]")
+                        if events:
+                            ntfy_image = events[-1].get("image_path")
+                    except Exception:
+                        ntfy_image = item["image_path"] if item["image_path"] else None
                     click_url = f"{base_url}/events/{log_event_id}" if (base_url and log_event_id) else None
-                    asyncio.run(send_ntfy(item["address"], message, title=subject, click_url=click_url))
+                    asyncio.run(send_ntfy(item["address"], message, title=subject,
+                                         click_url=click_url, image_path=ntfy_image))
         except Exception as exc:
             status = "failed"
             err = str(exc)
