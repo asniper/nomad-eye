@@ -52,11 +52,15 @@ def _write_log(camera_id, contact, event_id, labels, message, status, err):
     log_db.close()
 
 
-async def _send_contact(contact, message, labels, image_path):
+async def _send_contact(contact, message, labels, image_path, click_url=None, primary_category=None):
     if contact["type"] == "sms":
         await send_sms(contact["address"], contact["carrier"] or "", message, None)
     elif contact["type"] == "email":
         await send_email(contact["address"], f"Nomad Eye: {labels}", message, image_path)
+    elif contact["type"] == "ntfy":
+        from notifications.ntfy import send_ntfy
+        await send_ntfy(contact["address"], message, title=f"Nomad Eye: {labels}",
+                        click_url=click_url, category=primary_category)
 
 
 def _parse_last_notified(last_str):
@@ -133,6 +137,7 @@ async def dispatch_notification(camera_id: int, detections: list, image_path: st
             labels = ", ".join(
                 t for t, d in sorted(unique.items(), key=lambda x: _PRIORITY.get(x[1].category, 4))
             )
+            primary_category = min(matching, key=lambda d: _PRIORITY.get(d.category, 4)).category
             lines = ["Nomad Eye Alert", f"{camera_name} · {time_str}", f"Detected: {labels}"]
             if event_link:
                 lines.append(f"View: {event_link}")
@@ -144,7 +149,8 @@ async def dispatch_notification(camera_id: int, detections: list, image_path: st
             if freq_secs == 0:
                 err = None
                 try:
-                    await _send_contact(contact, message, labels, image_path)
+                    await _send_contact(contact, message, labels, image_path,
+                                        click_url=event_link, primary_category=primary_category)
                     status = "sent"
                 except Exception as exc:
                     status = "failed"
@@ -158,7 +164,8 @@ async def dispatch_notification(camera_id: int, detections: list, image_path: st
                 if elapsed >= freq_secs:
                     err = None
                     try:
-                        await _send_contact(contact, message, labels, image_path)
+                        await _send_contact(contact, message, labels, image_path,
+                                            click_url=event_link, primary_category=primary_category)
                         status = "sent"
                     except Exception as exc:
                         status = "failed"

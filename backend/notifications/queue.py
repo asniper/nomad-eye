@@ -122,10 +122,14 @@ def _process_due_items():
         try:
             from notifications.sms import send_sms
             from notifications.email import send_email
+            from notifications.ntfy import send_ntfy
             if item["channel"] == "sms":
                 asyncio.run(send_sms(item["address"], item["carrier"] or "", message, None))
             elif item["channel"] == "email":
                 asyncio.run(send_email(item["address"], subject, message, image_paths))
+            elif item["channel"] == "ntfy":
+                click_url = f"{base_url}/events/{log_event_id}" if (base_url and log_event_id) else None
+                asyncio.run(send_ntfy(item["address"], message, title=subject, click_url=click_url))
         except Exception as exc:
             status = "failed"
             err = str(exc)

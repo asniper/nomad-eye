@@ -189,6 +189,8 @@ def init_db():
         ('motion_scale',             '0.5'),
         ('detection_cooldown',       '3.0'),
         ('clips_primary_device',     ''),
+        ('ntfy_server',              'https://ntfy.sh'),
+        ('ntfy_token',               ''),
     ]
     for key, value in defaults:
         db.execute(
@@ -196,6 +198,29 @@ def init_db():
             (key, value)
         )
     db.commit()
+
+    # Migrate contacts table to allow 'ntfy' type (recreate to change CHECK constraint)
+    try:
+        schema_row = db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='contacts'"
+        ).fetchone()
+        if schema_row and 'ntfy' not in (schema_row[0] or ''):
+            db.executescript("""
+                CREATE TABLE contacts_v2 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    type TEXT NOT NULL CHECK(type IN ('sms', 'email', 'ntfy')),
+                    address TEXT NOT NULL,
+                    carrier TEXT,
+                    active INTEGER DEFAULT 1
+                );
+                INSERT INTO contacts_v2 SELECT id, name, type, address, carrier, active FROM contacts;
+                DROP TABLE contacts;
+                ALTER TABLE contacts_v2 RENAME TO contacts;
+            """)
+            db.commit()
+    except Exception:
+        pass
 
     # Migrate camera names from app_config into cameras.name (one-time, safe to re-run)
     try:

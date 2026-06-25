@@ -82,6 +82,7 @@ async def test_contact(contact_id: int, db: sqlite3.Connection = Depends(get_db)
         raise HTTPException(status_code=404, detail="Contact not found")
     from notifications.sms import send_sms
     from notifications.email import send_email
+    from notifications.ntfy import send_ntfy
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
     message = f"Nomad Eye test notification\nSent: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
@@ -89,6 +90,8 @@ async def test_contact(contact_id: int, db: sqlite3.Connection = Depends(get_db)
     try:
         if contact["type"] == "sms":
             await send_sms(contact["address"], contact["carrier"] or "", message, None)
+        elif contact["type"] == "ntfy":
+            await send_ntfy(contact["address"], message, title="Nomad Eye: Test")
         else:
             await send_email(contact["address"], "Nomad Eye: Test", message, None)
         status = "sent"

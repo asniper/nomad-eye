@@ -303,6 +303,15 @@ export default function Settings() {
         </SettingRow>
       </Card>
 
+      <Card title="ntfy Push Notifications">
+        <SettingRow label="Server URL" hint="ntfy.sh (cloud, free) or your self-hosted ntfy server URL.">
+          <TextInput keyName="ntfy_server" current={allSettings.ntfy_server ?? 'https://ntfy.sh'} onSave={saveSetting} saving={saving.ntfy_server} saved={saved.ntfy_server} error={errors.ntfy_server} placeholder="https://ntfy.sh" />
+        </SettingRow>
+        <SettingRow label="Access Token" hint="Optional. Required only for private topics or authenticated self-hosted servers.">
+          <TextInput keyName="ntfy_token" current={allSettings.ntfy_token ?? ''} onSave={saveSetting} saving={saving.ntfy_token} saved={saved.ntfy_token} error={errors.ntfy_token} placeholder="tk_..." secret />
+        </SettingRow>
+      </Card>
+
       <Card title="Account">
         <SettingRow label="Sign out" hint="You will be returned to the login screen.">
           <button

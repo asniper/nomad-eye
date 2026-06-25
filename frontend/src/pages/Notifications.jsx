@@ -64,6 +64,10 @@ function ContactForm({ onSave, onCancel, smsProvider }) {
 
   const needsCarrier = type === 'sms' && smsProvider === 'email_gateway'
 
+  const valuePlaceholder = type === 'sms' ? '+1234567890'
+    : type === 'email' ? 'email@example.com'
+    : 'my-alerts-topic'
+
   const submit = async (e) => {
     e.preventDefault()
     if (needsCarrier && !carrier) { setError('Please select a carrier for Email Gateway SMS.'); return }
@@ -100,17 +104,24 @@ function ContactForm({ onSave, onCancel, smsProvider }) {
         >
           <option value="sms">SMS</option>
           <option value="email">Email</option>
+          <option value="ntfy">ntfy</option>
         </select>
         <input
           value={value}
           onChange={e => setValue(e.target.value)}
-          placeholder={type === 'sms' ? '+1234567890' : 'email@example.com'}
+          placeholder={valuePlaceholder}
           required
           className={inputCls}
           onFocus={e => e.target.style.borderColor = '#4c6e5d'}
           onBlur={e => e.target.style.borderColor = '#484848'}
         />
       </div>
+      {type === 'ntfy' && (
+        <p className="text-xs text-gray-500">
+          Enter the ntfy topic name (e.g. <span className="font-mono text-gray-400">my-alerts</span>).
+          The server URL and optional token are configured in Settings → ntfy.
+        </p>
+      )}
       {type === 'sms' && (
         <div className="flex items-center gap-3">
           <select
@@ -316,7 +327,7 @@ function NotificationLog() {
         {log.map(entry => (
           <div key={entry.id} className="py-3 flex items-start gap-3">
             <div className="flex flex-col gap-1 shrink-0 pt-0.5">
-              <Badge label={entry.channel} color={entry.channel === 'sms' ? 'green' : 'blue'} />
+              <Badge label={entry.channel} color={entry.channel === 'sms' ? 'green' : entry.channel === 'ntfy' ? 'yellow' : 'blue'} />
               <span
                 className="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-medium"
                 style={entry.status === 'sent'
@@ -462,7 +473,7 @@ export default function Notifications() {
                       <span className="text-sm font-medium text-white">{c.name}</span>
                     </td>
                     <td className="py-3 pr-4">
-                      <Badge label={c.type} color={c.type === 'sms' ? 'green' : 'blue'} />
+                      <Badge label={c.type} color={c.type === 'sms' ? 'green' : c.type === 'ntfy' ? 'yellow' : 'blue'} />
                     </td>
                     <td className="py-3 pr-4">
                       <span className="text-xs text-gray-400 font-mono">{c.value}</span>
@@ -547,7 +558,7 @@ export default function Notifications() {
                           <span className="text-sm font-medium text-white">{contact?.name ?? `Contact ${r.contact_id}`}</span>
                           {contact && (
                             <p className="text-xs text-gray-500 mt-0.5">
-                              <Badge label={contact.type} color={contact.type === 'sms' ? 'green' : 'blue'} />
+                              <Badge label={contact.type} color={contact.type === 'sms' ? 'green' : contact.type === 'ntfy' ? 'yellow' : 'blue'} />
                             </p>
                           )}
                         </div>
