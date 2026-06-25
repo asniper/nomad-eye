@@ -361,6 +361,8 @@ export default function Settings() {
         </div>
       </Card>
 
+      <NotificationLinksCard allSettings={allSettings} saveSetting={saveSetting} saving={saving} saved={saved} errors={errors} />
+
       <Card title="Account">
         <SettingRow label="Sign out" hint="You will be returned to the login screen.">
           <button
@@ -374,6 +376,77 @@ export default function Settings() {
 
       </>}
     </div>
+  )
+}
+
+const LINK_MODES = [
+  { value: 'local_ip',  label: 'Local IP',     hint: 'Auto-detected LAN IP (e.g. http://192.168.0.165)' },
+  { value: 'hostname',  label: 'Device Name',  hint: 'Custom hostname you configure below' },
+  { value: 'tailscale', label: 'Tailscale IP', hint: 'Tailscale mesh IP — works outside your local network' },
+]
+
+function NotificationLinksCard({ allSettings, saveSetting, saving, saved, errors }) {
+  const [previewUrl, setPreviewUrl] = useState(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+
+  const mode = allSettings.notification_link_mode || 'local_ip'
+
+  const fetchPreview = () => {
+    setPreviewLoading(true)
+    settings.getNotificationUrl()
+      .then(r => setPreviewUrl(r.data?.url || null))
+      .catch(() => setPreviewUrl(null))
+      .finally(() => setPreviewLoading(false))
+  }
+
+  return (
+    <Card title="Notification Links">
+      <SettingRow label="Link mode" hint="How the device URL is generated for links in notifications and alerts.">
+        <div className="flex flex-col gap-2">
+          {LINK_MODES.map(m => (
+            <label key={m.value} className="flex items-start gap-3 cursor-pointer group">
+              <div className="mt-0.5 w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center transition-colors"
+                style={{ borderColor: mode === m.value ? '#FFB800' : '#484848', background: mode === m.value ? '#FFB800' : 'transparent' }}
+                onClick={() => saveSetting('notification_link_mode', m.value)}
+              >
+                {mode === m.value && <div className="w-1.5 h-1.5 rounded-full bg-[#1A1A1A]" />}
+              </div>
+              <div onClick={() => saveSetting('notification_link_mode', m.value)}>
+                <p className="text-sm text-white">{m.label}</p>
+                <p className="text-xs text-gray-500">{m.hint}</p>
+              </div>
+            </label>
+          ))}
+        </div>
+      </SettingRow>
+
+      {mode === 'hostname' && (
+        <SettingRow label="Hostname" hint="Hostname or IP to use in links. Can be a local hostname, domain, or IP.">
+          <TextInput
+            keyName="notification_hostname"
+            current={allSettings.notification_hostname ?? ''}
+            onSave={saveSetting}
+            saving={saving.notification_hostname}
+            saved={saved.notification_hostname}
+            error={errors.notification_hostname}
+            placeholder="nomadeye.local"
+          />
+        </SettingRow>
+      )}
+
+      <div className="pt-3 flex items-center gap-3">
+        <button
+          onClick={fetchPreview}
+          disabled={previewLoading}
+          className="px-3 py-1.5 bg-[#3A3A3A] hover:bg-[#484848] text-sm text-gray-300 rounded-md transition-colors disabled:opacity-50"
+        >
+          {previewLoading ? 'Checking…' : 'Preview current URL'}
+        </button>
+        {previewUrl && (
+          <span className="text-sm font-mono text-gray-300">{previewUrl}</span>
+        )}
+      </div>
+    </Card>
   )
 }
 

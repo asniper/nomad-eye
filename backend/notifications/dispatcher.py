@@ -1,10 +1,10 @@
 import json
-import socket
 import sqlite3
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from notifications.sms import send_sms
 from notifications.email import send_email
+from notifications.link import get_notification_base_url
 from config.settings import get_settings
 
 cfg = get_settings()
@@ -83,11 +83,7 @@ async def dispatch_notification(camera_id: int, detections: list, image_path: st
     name_row = db.execute("SELECT value FROM app_config WHERE key=?", (f"camera_name_{camera_id}",)).fetchone()
     camera_name = name_row["value"] if name_row else f"Camera {camera_id}"
 
-    internal_url = f"http://{socket.gethostname()}"
-    ext_row = db.execute(
-        "SELECT value FROM app_config WHERE key IN ('external_url','app_base_url') ORDER BY key='external_url' DESC LIMIT 1"
-    ).fetchone()
-    notification_url = ext_row["value"].rstrip("/") if (ext_row and ext_row["value"]) else internal_url
+    notification_url = get_notification_base_url(db)
 
     tz_row = db.execute("SELECT value FROM app_config WHERE key='timezone'").fetchone()
     tz_name = tz_row["value"] if tz_row else "UTC"

@@ -205,6 +205,8 @@ def init_db():
         ('presence_timeout',         '5'),
         ('presence_home_status',     'home'),
         ('presence_away_status',     'away'),
+        ('notification_link_mode',   'local_ip'),
+        ('notification_hostname',    ''),
     ]
     for key, value in defaults:
         db.execute(

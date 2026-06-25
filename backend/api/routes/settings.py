@@ -136,6 +136,12 @@ async def set_setting(body: ConfigItem, db: sqlite3.Connection = Depends(get_db)
     return {"saved": True}
 
 
+@router.get("/notification-url")
+def get_notification_url(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+    from notifications.link import get_notification_base_url
+    return {"url": get_notification_base_url(db)}
+
+
 def _parse_classes(value: str):
     """Parse a comma-separated class string into a list, or None if empty."""
     if not value or not value.strip():

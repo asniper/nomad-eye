@@ -76,6 +76,7 @@ export const settings = {
   getAll: () => api.get('/settings/'),
   set: (key, value) => api.post('/settings/', { key, value: String(value) }),
   getModels: () => api.get('/settings/models'),
+  getNotificationUrl: () => api.get('/settings/notification-url'),
 }
 
 export const status = {

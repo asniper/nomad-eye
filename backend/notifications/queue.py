@@ -1,11 +1,11 @@
 import asyncio
 import json
-import socket
 import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from notifications.link import get_notification_base_url
 from config.settings import get_settings
 
 cfg = get_settings()
@@ -97,11 +97,7 @@ def _process_due_items():
         db.close()
         return
 
-    internal_url = f"http://{socket.gethostname()}"
-    ext_row = db.execute(
-        "SELECT value FROM app_config WHERE key IN ('external_url','app_base_url') ORDER BY key='external_url' DESC LIMIT 1"
-    ).fetchone()
-    base_url = ext_row["value"].rstrip("/") if (ext_row and ext_row["value"]) else internal_url
+    base_url = get_notification_base_url(db)
     tz_row = db.execute("SELECT value FROM app_config WHERE key='timezone'").fetchone()
     tz_name = tz_row["value"] if tz_row else "UTC"
     ntfy_enabled_row = db.execute("SELECT value FROM app_config WHERE key='ntfy_enabled'").fetchone()
