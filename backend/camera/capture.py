@@ -30,6 +30,7 @@ class CameraCapture:
         self._sw_brightness: int = sw_brightness
         self._sw_contrast: float = sw_contrast
         self._night_mode: str = night_mode
+        self._night_mode_hw: bool = False  # True if XU ioctl succeeded
         self._cap: Optional[cv2.VideoCapture] = None
         self._frame: Optional[Frame] = None
         self._lock = threading.Lock()
@@ -51,6 +52,9 @@ class CameraCapture:
         if self._hw_adjustments:
             from camera.v4l2 import apply_controls
             apply_controls(self.device_path, self._hw_adjustments)
+        if self._night_mode != 'off':
+            from camera.arducam_xu import set_night_mode as _xu_night
+            self._night_mode_hw = _xu_night(self.device_path, self._night_mode)
         self._running = True
         self._thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._thread.start()
@@ -86,6 +90,8 @@ class CameraCapture:
 
     def set_night_mode(self, mode: str):
         self._night_mode = mode
+        from camera.arducam_xu import set_night_mode as _xu_night
+        self._night_mode_hw = _xu_night(self.device_path, mode)
 
     def set_adjustments(self, hw: dict = None, sw_brightness: int = None, sw_contrast: float = None):
         if hw is not None:
@@ -109,6 +115,9 @@ class CameraCapture:
         if self._hw_adjustments:
             from camera.v4l2 import apply_controls
             apply_controls(self.device_path, self._hw_adjustments)
+        if self._night_mode_hw:
+            from camera.arducam_xu import set_night_mode as _xu_night
+            _xu_night(self.device_path, self._night_mode)
 
     def _capture_loop(self):
         consecutive_failures = 0
@@ -130,12 +139,13 @@ class CameraCapture:
                 if ret:
                     if self._sw_brightness != 0 or self._sw_contrast != 1.0:
                         frame = cv2.convertScaleAbs(frame, alpha=self._sw_contrast, beta=self._sw_brightness)
-                    if self._night_mode == 'on':
-                        frame = cv2.LUT(frame, _NIGHT_LUT)
-                    elif self._night_mode == 'auto':
-                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                        if cv2.resize(gray, (1, 1))[0][0] < 80:
+                    if not self._night_mode_hw:
+                        if self._night_mode == 'on':
                             frame = cv2.LUT(frame, _NIGHT_LUT)
+                        elif self._night_mode == 'auto':
+                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                            if cv2.resize(gray, (1, 1))[0][0] < 80:
+                                frame = cv2.LUT(frame, _NIGHT_LUT)
                     consecutive_failures = 0
                     now = time.time()
                     _next_capture = now + 1.0 / max(self._fps, 1)

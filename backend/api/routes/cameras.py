@@ -130,6 +130,7 @@ def _build_camera_list(db: sqlite3.Connection) -> list:
             "face_detection_enabled": bool(row['face_detection_enabled']) if row['face_detection_enabled'] is not None else True,
             "face_sensitivity": row['face_sensitivity'] or 'normal',
             "night_mode": row['night_mode'] or 'off',
+            "night_mode_hw": bool(live_cam._night_mode_hw) if live_cam else False,
             "width": res_w,
             "height": res_h,
             "stream_fps": res_fps,
@@ -488,11 +489,13 @@ def set_night_mode(
         raise HTTPException(status_code=400, detail="mode must be off, on, or auto")
     db.execute("UPDATE cameras SET night_mode=? WHERE camera_id=?", (mode, camera_id))
     db.commit()
+    hw = False
     if _pipeline:
         cam = next((c for c in _pipeline._cameras if c.camera_id == camera_id), None)
         if cam:
             cam.set_night_mode(mode)
-    return {"ok": True, "night_mode": mode}
+            hw = cam._night_mode_hw
+    return {"ok": True, "night_mode": mode, "hw": hw}
 
 
 @router.websocket("/{camera_id}/stream")

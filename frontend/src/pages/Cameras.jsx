@@ -426,6 +426,7 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
   const [showAdjust, setShowAdjust] = useState(false)
   const [showFace, setShowFace] = useState(false)
   const [nightMode, setNightMode] = useState(cam.night_mode || 'off')
+  const [nightModeHw, setNightModeHw] = useState(cam.night_mode_hw || false)
   const [debugMode, setDebugMode] = useState(false)
   const [debugInfo, setDebugInfo] = useState(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -529,7 +530,10 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
 
   const handleNightMode = useCallback(async (mode) => {
     setNightMode(mode)
-    await cameras.setNightMode(cam.id, mode).catch(() => {})
+    try {
+      const r = await cameras.setNightMode(cam.id, mode)
+      setNightModeHw(r?.data?.hw ?? false)
+    } catch {}
   }, [cam.id])
 
   const handleFullscreen = useCallback(() => {
@@ -645,17 +649,25 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
           >
             Adjust
           </button>
-          <div className="flex rounded overflow-hidden border border-[#484848]" title="Night vision mode">
-            {[['off','Off'],['auto','Auto'],['on','On']].map(([val, label]) => (
-              <button
-                key={val}
-                onClick={() => handleNightMode(val)}
-                className="px-2 py-1 text-xs font-medium transition-colors"
-                style={nightMode === val
-                  ? { background: '#1a3a5c', color: '#60a5fa' }
-                  : { background: '#2A2A2A', color: '#6B7280' }}
-              >{label}</button>
-            ))}
+          <div className="flex items-center gap-1">
+            <div className="flex rounded overflow-hidden border border-[#484848]" title={`Night vision mode${nightModeHw ? ' (hardware IR)' : ' (software)'}`}>
+              {[['off','Off'],['auto','Auto'],['on','On']].map(([val, label]) => (
+                <button
+                  key={val}
+                  onClick={() => handleNightMode(val)}
+                  className="px-2 py-1 text-xs font-medium transition-colors"
+                  style={nightMode === val
+                    ? { background: '#1a3a5c', color: '#60a5fa' }
+                    : { background: '#2A2A2A', color: '#6B7280' }}
+                >{label}</button>
+              ))}
+            </div>
+            {nightMode !== 'off' && (
+              <span className="text-xs" style={{ color: nightModeHw ? '#60a5fa' : '#6B7280' }}
+                title={nightModeHw ? 'Hardware IR LEDs' : 'Software boost (no HW IR)'}>
+                {nightModeHw ? 'IR' : 'SW'}
+              </span>
+            )}
           </div>
           <button
             onClick={() => setShowFace(p => !p)}
