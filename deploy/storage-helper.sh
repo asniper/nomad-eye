@@ -23,7 +23,12 @@ if [ "$ACTION" = "tailscale-set-operator" ]; then
 fi
 
 if [ "$ACTION" = "arp-scan" ]; then
-    arp-scan --localnet 2>/dev/null || true
+    IFACE=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'dev \K\S+' | head -1)
+    if [ -n "$IFACE" ]; then
+        arp-scan -I "$IFACE" --localnet 2>/dev/null || true
+    else
+        arp-scan --localnet 2>/dev/null || true
+    fi
     exit 0
 fi
 
