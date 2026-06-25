@@ -350,7 +350,7 @@ function CameraDetections({ camId }) {
             <tr key={d.id}>
               <td className="py-2 pr-3">
                 <Link
-                  to={d.event_id ? `/detections?event=${d.event_id}` : `/detections`}
+                  to={d.event_id ? `/events/${d.event_id}` : `/detections`}
                   className="text-xs hover:text-white transition-colors"
                   style={{ color: '#FFB800' }}
                 >
