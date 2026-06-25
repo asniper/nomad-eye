@@ -1,3 +1,4 @@
+import base64
 import os
 import sqlite3
 import urllib.request
@@ -14,6 +15,17 @@ _CATEGORY_PRIORITY = {
     'animals':  3,
     'other':    3,
 }
+
+
+def _header_val(s: str) -> str:
+    """Encode header value as base64 if it contains non-ASCII or control chars."""
+    try:
+        s.encode('ascii')
+        if '\n' not in s and '\r' not in s:
+            return s
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        pass
+    return 'base64:' + base64.b64encode(s.encode('utf-8')).decode('ascii')
 
 
 async def send_ntfy(topic: str, message: str, title: str = 'Nomad Eye Alert',
@@ -40,7 +52,7 @@ async def send_ntfy(topic: str, message: str, title: str = 'Nomad Eye Alert',
     url = f'{server}/{topic}'
 
     headers = {
-        'Title': title,
+        'Title': _header_val(title),
         'Priority': str(priority),
     }
     if click_url:
@@ -62,7 +74,7 @@ async def send_ntfy(topic: str, message: str, title: str = 'Nomad Eye Alert',
         content_type = 'image/png' if ext == '.png' else 'image/jpeg'
         headers['Content-Type'] = content_type
         headers['Filename'] = 'detection' + ext
-        headers['Message'] = message
+        headers['Message'] = _header_val(message)
         data = img_data
         method = 'PUT'
     else:
