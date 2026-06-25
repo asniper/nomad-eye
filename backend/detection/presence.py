@@ -1,4 +1,6 @@
+import concurrent.futures
 import re
+import socket
 import sqlite3
 import subprocess
 import threading
@@ -12,8 +14,33 @@ cfg = get_settings()
 _ARP_RE = re.compile(r'^(\d{1,3}(?:\.\d{1,3}){3})\s+([\da-fA-F]{2}(?::[\da-fA-F]{2}){5})\s*(.*)')
 
 
+def _resolve_hostname(ip):
+    try:
+        name = socket.gethostbyaddr(ip)[0]
+        return name if name and name != ip else None
+    except Exception:
+        return None
+
+
+def _enrich_hostnames(devices):
+    """Parallel reverse DNS lookups, best-effort within 4 seconds."""
+    if not devices:
+        return
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(devices), 30)) as ex:
+        futures = {ex.submit(_resolve_hostname, d['ip']): i for i, d in enumerate(devices)}
+        done, _ = concurrent.futures.wait(futures, timeout=4)
+        for f in done:
+            idx = futures[f]
+            try:
+                h = f.result()
+                if h:
+                    devices[idx]['hostname'] = h
+            except Exception:
+                pass
+
+
 def run_arp_scan():
-    """Run arp-scan via storage-helper. Returns list of {ip, mac, vendor} or None on error."""
+    """Run arp-scan via storage-helper. Returns list of {ip, mac, vendor, hostname?} or None on error."""
     try:
         result = subprocess.run(
             ['sudo', '/opt/nomad-eye/storage-helper.sh', 'arp-scan'],
@@ -30,6 +57,7 @@ def run_arp_scan():
                     'mac': m.group(2).lower(),
                     'vendor': m.group(3).strip(),
                 })
+        _enrich_hostnames(devices)
         return devices
     except Exception:
         return None

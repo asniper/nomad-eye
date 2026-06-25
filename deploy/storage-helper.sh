@@ -25,9 +25,9 @@ fi
 if [ "$ACTION" = "arp-scan" ]; then
     IFACE=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'dev \K\S+' | head -1)
     if [ -n "$IFACE" ]; then
-        arp-scan -I "$IFACE" --localnet 2>/dev/null || true
+        arp-scan -I "$IFACE" --localnet --retry=3 2>/dev/null || true
     else
-        arp-scan --localnet 2>/dev/null || true
+        arp-scan --localnet --retry=3 2>/dev/null || true
     fi
     exit 0
 fi

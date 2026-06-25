@@ -520,7 +520,7 @@ function PresenceCard({ allSettings, saveSetting, saving, saved }) {
 
   const addFromScan = (device) => {
     setNewMac(device.mac)
-    setNewName(device.vendor || '')
+    setNewName(device.hostname || device.vendor || '')
     setAddingDevice(true)
     setScanResults(null)
   }
@@ -704,8 +704,8 @@ function PresenceCard({ allSettings, saveSetting, saving, saved }) {
                     <thead>
                       <tr className="border-b border-[#3A3A3A]">
                         <th className="text-left px-3 py-2 text-gray-500 font-medium">IP</th>
-                        <th className="text-left px-3 py-2 text-gray-500 font-medium">MAC</th>
-                        <th className="text-left px-3 py-2 text-gray-500 font-medium hidden sm:table-cell">Vendor</th>
+                        <th className="text-left px-3 py-2 text-gray-500 font-medium hidden sm:table-cell">MAC</th>
+                        <th className="text-left px-3 py-2 text-gray-500 font-medium">Name / Vendor</th>
                         <th className="px-3 py-2" />
                       </tr>
                     </thead>
@@ -715,8 +715,13 @@ function PresenceCard({ allSettings, saveSetting, saving, saved }) {
                         return (
                           <tr key={i} className="hover:bg-[#252525] transition-colors">
                             <td className="px-3 py-2 font-mono text-gray-300">{d.ip}</td>
-                            <td className="px-3 py-2 font-mono text-gray-400">{d.mac}</td>
-                            <td className="px-3 py-2 text-gray-500 hidden sm:table-cell truncate max-w-[160px]">{d.vendor || '—'}</td>
+                            <td className="px-3 py-2 font-mono text-gray-400 hidden sm:table-cell">{d.mac}</td>
+                            <td className="px-3 py-2 truncate max-w-[180px]">
+                              {d.hostname
+                                ? <><span className="text-gray-300">{d.hostname}</span>{d.vendor && <span className="text-gray-600 ml-1.5 text-xs">{d.vendor}</span>}</>
+                                : <span className="text-gray-500">{d.vendor || '—'}</span>
+                              }
+                            </td>
                             <td className="px-3 py-2 text-right">
                               {isWatched
                                 ? <span className="text-green-400">Watching</span>
