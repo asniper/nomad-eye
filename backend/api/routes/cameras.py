@@ -96,7 +96,7 @@ def _get_present_usb_ids() -> set:
 def _build_camera_list(db: sqlite3.Connection) -> list:
     """Return the full camera list (non-deleted) with live pipeline state overlaid."""
     db_cams = db.execute(
-        "SELECT camera_id, usb_id, name, last_seen, enabled, face_detection_enabled, face_sensitivity FROM cameras WHERE deleted=0 ORDER BY camera_id"
+        "SELECT camera_id, usb_id, name, last_seen, enabled, face_detection_enabled, face_sensitivity, night_mode FROM cameras WHERE deleted=0 ORDER BY camera_id"
     ).fetchall()
     event_counts = {
         r['camera_id']: r['cnt']
@@ -129,6 +129,7 @@ def _build_camera_list(db: sqlite3.Connection) -> list:
             "enabled": bool(row['enabled']),
             "face_detection_enabled": bool(row['face_detection_enabled']) if row['face_detection_enabled'] is not None else True,
             "face_sensitivity": row['face_sensitivity'] or 'normal',
+            "night_mode": row['night_mode'] or 'off',
             "width": res_w,
             "height": res_h,
             "stream_fps": res_fps,
@@ -220,15 +221,17 @@ async def scan_and_refresh(db: sqlite3.Connection = None) -> list:
                 dev_idx = int(path.replace("/dev/video", ""))
                 w, h, fps = _pipeline._camera_quality()
                 adj_row = _db.execute(
-                    "SELECT hw_adjustments, sw_brightness, sw_contrast FROM cameras WHERE camera_id=?",
+                    "SELECT hw_adjustments, sw_brightness, sw_contrast, night_mode FROM cameras WHERE camera_id=?",
                     (cam_id,)
                 ).fetchone()
                 hw_adj = json.loads(adj_row['hw_adjustments'] or '{}') if adj_row else {}
                 sw_br = (adj_row['sw_brightness'] or 0) if adj_row else 0
                 sw_ct = (adj_row['sw_contrast'] or 1.0) if adj_row else 1.0
+                night_mode = (adj_row['night_mode'] or 'off') if adj_row else 'off'
                 cap = CameraCapture(camera_id=cam_id, device_index=dev_idx, usb_id=usb_id,
                                     width=w, height=h, fps=fps,
-                                    hw_adjustments=hw_adj, sw_brightness=sw_br, sw_contrast=sw_ct)
+                                    hw_adjustments=hw_adj, sw_brightness=sw_br, sw_contrast=sw_ct,
+                                    night_mode=night_mode)
                 cap.start()
                 pending.append((cap, cam_id, was_deleted))
                 existing_cam_ids.add(cam_id)
@@ -430,7 +433,7 @@ def get_camera_controls(
     _=Depends(require_auth),
 ):
     row = db.execute(
-        "SELECT hw_adjustments, sw_brightness, sw_contrast FROM cameras WHERE camera_id=? AND deleted=0",
+        "SELECT hw_adjustments, sw_brightness, sw_contrast, night_mode FROM cameras WHERE camera_id=? AND deleted=0",
         (camera_id,)
     ).fetchone()
     if not row:
@@ -438,6 +441,7 @@ def get_camera_controls(
     hw_adjustments = json.loads(row['hw_adjustments'] or '{}')
     sw_brightness = row['sw_brightness'] if row['sw_brightness'] is not None else 0
     sw_contrast = row['sw_contrast'] if row['sw_contrast'] is not None else 1.0
+    night_mode = row['night_mode'] or 'off'
     hw_controls = {}
     if _pipeline:
         cam = next((c for c in _pipeline._cameras if c.camera_id == camera_id), None)
@@ -449,6 +453,7 @@ def get_camera_controls(
         "hw_adjustments": hw_adjustments,
         "sw_brightness": sw_brightness,
         "sw_contrast": sw_contrast,
+        "night_mode": night_mode,
     }
 
 
@@ -469,6 +474,25 @@ def set_camera_adjustments(
         if cam:
             cam.set_adjustments(hw=body.hw, sw_brightness=int(body.sw_brightness), sw_contrast=float(body.sw_contrast))
     return {"ok": True}
+
+
+@router.patch("/{camera_id}/night-mode")
+def set_night_mode(
+    camera_id: int,
+    body: dict,
+    db: sqlite3.Connection = Depends(get_db),
+    _=Depends(require_auth),
+):
+    mode = body.get('mode', 'off')
+    if mode not in ('off', 'on', 'auto'):
+        raise HTTPException(status_code=400, detail="mode must be off, on, or auto")
+    db.execute("UPDATE cameras SET night_mode=? WHERE camera_id=?", (mode, camera_id))
+    db.commit()
+    if _pipeline:
+        cam = next((c for c in _pipeline._cameras if c.camera_id == camera_id), None)
+        if cam:
+            cam.set_night_mode(mode)
+    return {"ok": True, "night_mode": mode}
 
 
 @router.websocket("/{camera_id}/stream")

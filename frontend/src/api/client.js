@@ -25,6 +25,7 @@ export const cameras = {
   getControls: (id) => api.get(`/cameras/${id}/controls`),
   setAdjustments: (id, data) => api.patch(`/cameras/${id}/adjustments`, data),
   setFaceSettings: (id, data) => api.patch(`/cameras/${id}/face-settings`, data),
+  setNightMode: (id, mode) => api.patch(`/cameras/${id}/night-mode`, { mode }),
 }
 
 export const detections = {

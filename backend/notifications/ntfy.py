@@ -1,4 +1,3 @@
-import base64
 import os
 import sqlite3
 import urllib.request
@@ -18,14 +17,13 @@ _CATEGORY_PRIORITY = {
 
 
 def _header_val(s: str) -> str:
-    """Encode header value as base64 if it contains non-ASCII or control chars."""
-    try:
-        s.encode('ascii')
-        if '\n' not in s and '\r' not in s:
-            return s
-    except (UnicodeEncodeError, UnicodeDecodeError):
-        pass
-    return 'base64:' + base64.b64encode(s.encode('utf-8')).decode('ascii')
+    """Sanitize string for use as an HTTP header value (ASCII, no control chars)."""
+    _SUBS = {'·': '-', '’': "'", '‘': "'",
+             '“': '"', '”': '"', '—': '--', '–': '-'}
+    for ch, rep in _SUBS.items():
+        s = s.replace(ch, rep)
+    s = s.replace('\n', ' | ').replace('\r', '')
+    return s.encode('ascii', errors='replace').decode('ascii')
 
 
 async def send_ntfy(topic: str, message: str, title: str = 'Nomad Eye Alert',

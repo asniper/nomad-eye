@@ -168,6 +168,7 @@ def init_db():
         "ALTER TABLE cameras ADD COLUMN sw_contrast REAL NOT NULL DEFAULT 1.0",
         "ALTER TABLE cameras ADD COLUMN face_detection_enabled INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE cameras ADD COLUMN face_sensitivity TEXT NOT NULL DEFAULT 'normal'",
+        "ALTER TABLE cameras ADD COLUMN night_mode TEXT NOT NULL DEFAULT 'off'",
     ]:
         try:
             db.execute(migration)

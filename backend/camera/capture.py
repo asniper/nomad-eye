@@ -1,8 +1,12 @@
 import cv2
+import numpy as np
 import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
+
+# Gamma LUT for night vision boost (gamma=0.55 brightens shadows)
+_NIGHT_LUT = np.array([int(((i / 255.0) ** 0.55) * 255) for i in range(256)], dtype=np.uint8)
 
 @dataclass
 class Frame:
@@ -13,7 +17,8 @@ class Frame:
 class CameraCapture:
     def __init__(self, camera_id: int, device_index: int, usb_id: str = '',
                  width: int = 1280, height: int = 720, fps: int = 15,
-                 hw_adjustments: dict = None, sw_brightness: int = 0, sw_contrast: float = 1.0):
+                 hw_adjustments: dict = None, sw_brightness: int = 0, sw_contrast: float = 1.0,
+                 night_mode: str = 'off'):
         self.camera_id = camera_id
         self.device_index = device_index
         self.device_path = f"/dev/video{device_index}"
@@ -24,6 +29,7 @@ class CameraCapture:
         self._hw_adjustments: dict = hw_adjustments or {}
         self._sw_brightness: int = sw_brightness
         self._sw_contrast: float = sw_contrast
+        self._night_mode: str = night_mode
         self._cap: Optional[cv2.VideoCapture] = None
         self._frame: Optional[Frame] = None
         self._lock = threading.Lock()
@@ -78,6 +84,9 @@ class CameraCapture:
     def set_fps(self, fps: int):
         self._fps = max(1, fps)
 
+    def set_night_mode(self, mode: str):
+        self._night_mode = mode
+
     def set_adjustments(self, hw: dict = None, sw_brightness: int = None, sw_contrast: float = None):
         if hw is not None:
             self._hw_adjustments = hw
@@ -121,6 +130,12 @@ class CameraCapture:
                 if ret:
                     if self._sw_brightness != 0 or self._sw_contrast != 1.0:
                         frame = cv2.convertScaleAbs(frame, alpha=self._sw_contrast, beta=self._sw_brightness)
+                    if self._night_mode == 'on':
+                        frame = cv2.LUT(frame, _NIGHT_LUT)
+                    elif self._night_mode == 'auto':
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        if cv2.resize(gray, (1, 1))[0][0] < 80:
+                            frame = cv2.LUT(frame, _NIGHT_LUT)
                     consecutive_failures = 0
                     now = time.time()
                     _next_capture = now + 1.0 / max(self._fps, 1)

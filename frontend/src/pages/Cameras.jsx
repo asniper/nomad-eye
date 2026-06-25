@@ -425,6 +425,7 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
   const [showDetections, setShowDetections] = useState(false)
   const [showAdjust, setShowAdjust] = useState(false)
   const [showFace, setShowFace] = useState(false)
+  const [nightMode, setNightMode] = useState(cam.night_mode || 'off')
   const [debugMode, setDebugMode] = useState(false)
   const [debugInfo, setDebugInfo] = useState(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -525,6 +526,11 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
     setResetDone(true)
     setTimeout(() => setResetDone(false), 2000)
   }
+
+  const handleNightMode = useCallback(async (mode) => {
+    setNightMode(mode)
+    await cameras.setNightMode(cam.id, mode).catch(() => {})
+  }, [cam.id])
 
   const handleFullscreen = useCallback(() => {
     const el = videoContainerRef.current
@@ -639,6 +645,18 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
           >
             Adjust
           </button>
+          <div className="flex rounded overflow-hidden border border-[#484848]" title="Night vision mode">
+            {[['off','Off'],['auto','Auto'],['on','On']].map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => handleNightMode(val)}
+                className="px-2 py-1 text-xs font-medium transition-colors"
+                style={nightMode === val
+                  ? { background: '#1a3a5c', color: '#60a5fa' }
+                  : { background: '#2A2A2A', color: '#6B7280' }}
+              >{label}</button>
+            ))}
+          </div>
           <button
             onClick={() => setShowFace(p => !p)}
             className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
