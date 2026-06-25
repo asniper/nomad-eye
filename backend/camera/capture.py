@@ -52,9 +52,8 @@ class CameraCapture:
         if self._hw_adjustments:
             from camera.v4l2 import apply_controls
             apply_controls(self.device_path, self._hw_adjustments)
-        if self._night_mode != 'off':
-            from camera.arducam_xu import set_night_mode as _xu_night
-            self._night_mode_hw = _xu_night(self.device_path, self._night_mode)
+        from camera.arducam_xu import set_night_mode as _xu_night
+        self._night_mode_hw = _xu_night(self.device_path, self._night_mode)
         self._running = True
         self._thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._thread.start()

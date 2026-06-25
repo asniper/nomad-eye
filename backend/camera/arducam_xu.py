@@ -1,12 +1,19 @@
-"""Arducam USB camera UVC Extension Unit controls.
+"""Arducam Webcam Vitade AF (0x0c45:0x6366) UVC Extension Unit controls.
 
-Extension unit: unit ID 3, GUID {28f03370-6311-4a2e-ba2c-6890eb334016}
-Selector 1 = mode switch (day/auto/night)
+This camera exposes one XU:
+  Unit 3, GUID {28f03370-6311-4a2e-ba2c-6890eb334016} (Sonix SYS HW CTRL)
+  bNumControls=32 claimed, but only selectors 1-5 respond.
+  Unit 4 (USR HW CTRL / GPIO) is absent on this firmware.
 
-Mode byte values (selector 1, byte[0]):
-  1 = day   — color, IR cut filter active, IR LEDs off
-  2 = auto  — camera photosensor switches automatically (factory default)
-  3 = night — IR cut filter removed, IR LEDs on, B&W image
+Selector 1 (4 bytes) is used as the day/night mode switch.
+Byte[0] values (empirically determined from factory default = [2,0,0,0]):
+  1 = day   — force day mode (IR cut filter in, IR LEDs off)
+  2 = auto  — photosensor-controlled auto switching (factory default)
+  3 = night — force night mode (IR cut out, IR LEDs on)
+
+These values are best-guess from probing; no Arducam datasheet was found.
+If the IR does not respond, try swapping values or use linux-enable-ir-emitter
+to brute-force the correct selector/payload.
 """
 import ctypes
 import fcntl
