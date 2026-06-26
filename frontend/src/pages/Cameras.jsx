@@ -650,25 +650,25 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
             Adjust
           </button>
           <div className="flex items-center gap-1">
-            <div className="flex rounded overflow-hidden border border-[#484848]"
-              title={nightModeHw
-                ? 'Night vision — hardware IR LED control'
-                : 'Night vision — software brightness boost (camera IR is hardware-only)'}>
-              {[['off','Off'],['auto','Auto'],['on','On']].map(([val, label]) => (
-                <button
-                  key={val}
-                  onClick={() => handleNightMode(val)}
-                  className="px-2 py-1 text-xs font-medium transition-colors"
-                  style={nightMode === val
-                    ? { background: '#1a3a5c', color: '#60a5fa' }
-                    : { background: '#2A2A2A', color: '#6B7280' }}
-                >{label}</button>
-              ))}
-            </div>
-            {nightMode !== 'off' && (
-              <span className="text-xs" style={{ color: nightModeHw ? '#60a5fa' : '#6B7280' }}
-                title={nightModeHw ? 'Hardware IR LEDs controlled' : 'Software boost — IR LEDs controlled by onboard photocell'}>
-                {nightModeHw ? 'IR' : 'SW'}
+            {nightModeHw ? (
+              <div className="flex rounded overflow-hidden border border-[#484848]"
+                title="Night vision — hardware IR LED control">
+                {[['off','Off'],['auto','Auto'],['on','On']].map(([val, label]) => (
+                  <button
+                    key={val}
+                    onClick={() => handleNightMode(val)}
+                    className="px-2 py-1 text-xs font-medium transition-colors"
+                    style={nightMode === val
+                      ? { background: '#1a3a5c', color: '#60a5fa' }
+                      : { background: '#2A2A2A', color: '#6B7280' }}
+                  >{label}</button>
+                ))}
+              </div>
+            ) : (
+              <span className="text-xs px-2 py-1 rounded"
+                style={{ background: '#2A2A2A', color: '#4B5563' }}
+                title="IR is photocell-controlled — no software override available">
+                Photocell IR
               </span>
             )}
           </div>

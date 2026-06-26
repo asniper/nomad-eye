@@ -5,19 +5,6 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-# Software night enhancement: CLAHE on luminance + gamma lift.
-# Used when hardware IR control is unavailable (photocell-only cameras).
-# CLAHE dramatically improves local contrast on IR images; gamma lifts shadows.
-_NIGHT_CLAHE = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
-_NIGHT_GAMMA_LUT = np.array([int(((i / 255.0) ** 0.6) * 255) for i in range(256)], dtype=np.uint8)
-
-
-def _apply_night_sw(frame: np.ndarray) -> np.ndarray:
-    lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    l = _NIGHT_CLAHE.apply(l)
-    l = cv2.LUT(l, _NIGHT_GAMMA_LUT)
-    return cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
 
 @dataclass
 class Frame:
@@ -149,13 +136,6 @@ class CameraCapture:
                 if ret:
                     if self._sw_brightness != 0 or self._sw_contrast != 1.0:
                         frame = cv2.convertScaleAbs(frame, alpha=self._sw_contrast, beta=self._sw_brightness)
-                    if not self._night_mode_hw:
-                        if self._night_mode == 'on':
-                            frame = _apply_night_sw(frame)
-                        elif self._night_mode == 'auto':
-                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                            if cv2.resize(gray, (1, 1))[0][0] < 80:
-                                frame = _apply_night_sw(frame)
                     consecutive_failures = 0
                     now = time.time()
                     _next_capture = now + 1.0 / max(self._fps, 1)
