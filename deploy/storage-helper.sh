@@ -51,6 +51,8 @@ case "$ACTION" in
     mkdir -p "$MP"
     if mountpoint -q "$MP" 2>/dev/null; then
         chown nomadeye:nomadeye "$MP" 2>/dev/null || true
+        mkdir -p "$MP/nomadeye/images" "$MP/nomadeye/clips"
+        chown -R nomadeye:nomadeye "$MP/nomadeye"
         echo "$MP"
         exit 0
     fi
