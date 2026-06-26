@@ -1694,20 +1694,18 @@ function UpdateCard() {
 
   useEffect(() => { checkRef.current = check }, [check])
 
-  // After a restart, poll until service responds (up to 60s), then refresh status.
+  // After a restart, poll until service responds (up to 4 min), then reload to pick up new frontend.
   const waitForRestart = useCallback(() => {
     setInstallDone(true)
     let attempts = 0
     const t = setInterval(async () => {
       attempts++
       try {
-        const r = await systemApi.updateStatus()
+        await systemApi.updateStatus()
         clearInterval(t)
-        setInstallDone(false)
-        setStatus(r.data)
-        setError(null)
+        window.location.reload()
       } catch {
-        if (attempts >= 20) {
+        if (attempts >= 80) {
           clearInterval(t)
           setInstallDone(false)
           setError('Service did not come back after restart — check the device manually')
