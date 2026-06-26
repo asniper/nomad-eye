@@ -53,8 +53,10 @@ def is_supported(device_path: str) -> bool:
     spontaneously equal, then verifies it sticks after 100ms.
     Returns False for cameras where the selector is a live counter.
     """
+    # Counter resets to the written value then ticks after ~500ms.
+    # Wait 700ms so we can tell if the value drifted (counter) vs held (mode register).
     _xu_ioctl(device_path, _SELECTOR_MODE, _UVC_SET_CUR, [200, 0, 0, 0])
-    time.sleep(0.1)
+    time.sleep(0.7)
     result = _xu_ioctl(device_path, _SELECTOR_MODE, _UVC_GET_CUR, [0, 0, 0, 0])
     return result is not None and result[0] == 200
 
