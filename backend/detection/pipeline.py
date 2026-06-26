@@ -62,12 +62,19 @@ def _detect_with_timeout(detector, frame):
         return result[0] or [], False
     return [], True  # timed out
 
-def _bbox_has_motion(mask, bbox):
+# Fraction of bbox pixels that must show motion for vehicles to count as moving.
+# Parked cars accumulate background noise (leaves, shadows) but typically <2% of
+# their bbox pixels light up. A genuinely moving car saturates 20-60%.
+_VEHICLE_MOTION_RATIO = 0.05
+
+def _bbox_has_motion(mask, bbox, min_ratio=0.0):
     x1, y1, x2, y2 = bbox
     region = mask[y1:y2, x1:x2]
-    # Any motion pixel inside the bbox counts — low motion_threshold (e.g. 50 px)
-    # means very few fg pixels relative to a large detection bbox.
-    return region.size > 0 and bool((region > 0).any())
+    if region.size == 0:
+        return False
+    if min_ratio > 0.0:
+        return (region > 0).sum() / region.size >= min_ratio
+    return bool((region > 0).any())
 
 def _match_detection(detection, active_events, frame_shape):
     """Return the best matching active event for a detection, or None if it's new."""
@@ -752,10 +759,14 @@ class DetectionPipeline:
                     last_yolo_ms = round(elapsed * 1000)
                     last_yolo_time = now
 
-                    # Faces are exempt from the motion filter — you want to know who is
-                    # present regardless of whether the face region itself is moving.
+                    # Faces exempt from motion filter — presence matters regardless of movement.
+                    # Vehicles require substantial bbox motion; background noise (leaves, shadows)
+                    # typically lights up <2% of a parked car's bbox.
                     detections = [d for d in all_detections
-                                  if d.category == 'faces' or _bbox_has_motion(motion_mask, d.bbox)]
+                                  if d.category == 'faces'
+                                  or _bbox_has_motion(motion_mask, d.bbox,
+                                                      min_ratio=_VEHICLE_MOTION_RATIO
+                                                      if d.category == 'vehicles' else 0.0)]
                     self._handle_detections(cam, frame, detections, now)
                     if not detections:
                         # Motion present but YOLO found nothing in the motion area — clear overlay
@@ -785,9 +796,10 @@ class DetectionPipeline:
                             detector = self._object_detector
                         all_detections, timed_out = _detect_with_timeout(detector, frame)
                         if not timed_out:
+                            # Vehicles excluded: parked car in still scene shouldn't create events.
                             filtered = [d for d in all_detections
                                         if d.category in self._enabled_categories
-                                        and d.category != 'faces']
+                                        and d.category not in ('faces', 'vehicles')]
                             self._handle_detections(cam, frame, filtered, now)
                             active = self._active_events.get(cam.camera_id, [])
                             if active:
