@@ -650,7 +650,10 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
             Adjust
           </button>
           <div className="flex items-center gap-1">
-            <div className="flex rounded overflow-hidden border border-[#484848]" title={`Night vision mode${nightModeHw ? ' (hardware IR)' : ' (software)'}`}>
+            <div className="flex rounded overflow-hidden border border-[#484848]"
+              title={nightModeHw
+                ? 'Night vision — hardware IR LED control'
+                : 'Night vision — software brightness boost (camera IR is hardware-only)'}>
               {[['off','Off'],['auto','Auto'],['on','On']].map(([val, label]) => (
                 <button
                   key={val}
@@ -664,7 +667,7 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
             </div>
             {nightMode !== 'off' && (
               <span className="text-xs" style={{ color: nightModeHw ? '#60a5fa' : '#6B7280' }}
-                title={nightModeHw ? 'Hardware IR LEDs' : 'Software boost (no HW IR)'}>
+                title={nightModeHw ? 'Hardware IR LEDs controlled' : 'Software boost — IR LEDs controlled by onboard photocell'}>
                 {nightModeHw ? 'IR' : 'SW'}
               </span>
             )}
