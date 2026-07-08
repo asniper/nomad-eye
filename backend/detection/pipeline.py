@@ -6,11 +6,11 @@ import threading
 import asyncio
 from pathlib import Path
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from camera.capture import CameraCapture
 from camera.motion import MotionDetector
-from detection.detector import ObjectDetector, CATEGORY_COLORS_BGR, create_detector
+from detection.detector import ObjectDetector, create_detector
 from detection.face_recognizer import FaceRecognizer
+from detection.overlay import draw_boxes, draw_info_bar, format_camera_time_str
 from notifications.dispatcher import dispatch_notification
 from config.settings import get_settings
 from storage.manager import get_active_images_dir, get_active_clips_dir
@@ -161,6 +161,7 @@ class DetectionPipeline:
         self._clip_writers: dict = {}      # camera_id -> {event_id -> EventClipWriter}
         self._clip_lock = threading.Lock()
         self._last_clip_push: dict = {}    # camera_id -> float
+        self._clip_meta_cache: dict = {}   # camera_id -> (cam_name, tz_name, cached_at)
 
     def start(self):
         self._running = True
@@ -255,11 +256,13 @@ class DetectionPipeline:
                         pass
             self._clip_buffers.clear()
             self._last_clip_push.clear()
+            self._clip_meta_cache.clear()
 
     def _cleanup_camera_clips(self, camera_id: int):
         """Drop ring buffer and any in-progress writers for this camera."""
         self._clip_buffers.pop(camera_id, None)
         self._last_clip_push.pop(camera_id, None)
+        self._clip_meta_cache.pop(camera_id, None)
         with self._clip_lock:
             cam_writers = self._clip_writers.pop(camera_id, {})
         for w in cam_writers.values():
@@ -267,6 +270,21 @@ class DetectionPipeline:
                 w.close()
             except Exception:
                 pass
+
+    def _get_clip_overlay_meta(self, camera_id: int, now: float) -> tuple:
+        """Cache (camera_name, tz_name) for clip overlay text; refreshed every 30s so a
+        rename or timezone change is picked up without needing a pipeline restart."""
+        cached = self._clip_meta_cache.get(camera_id)
+        if cached and now - cached[2] < 30:
+            return cached[0], cached[1]
+        db = sqlite3.connect(cfg.db_path)
+        tz_row = db.execute("SELECT value FROM app_config WHERE key='timezone'").fetchone()
+        cam_row = db.execute("SELECT name FROM cameras WHERE camera_id=?", (camera_id,)).fetchone()
+        db.close()
+        tz_name = tz_row[0] if tz_row else 'UTC'
+        cam_name = (cam_row[0] if cam_row and cam_row[0] else f"Camera {camera_id}")
+        self._clip_meta_cache[camera_id] = (cam_name, tz_name, now)
+        return cam_name, tz_name
 
     def _clip_closer_loop(self):
         while self._running:
@@ -607,12 +625,22 @@ class DetectionPipeline:
                 if now - last_push >= CLIP_PUSH_INTERVAL:
                     if cam.camera_id not in self._clip_buffers:
                         self._clip_buffers[cam.camera_id] = ClipBuffer(self._clip_pre_roll)
-                    self._clip_buffers[cam.camera_id].push(frame)
+                    # Burn in the same camera/time/detection overlay as the event snapshots,
+                    # on a copy — the raw `frame` is still needed below for motion/YOLO.
+                    cam_name, tz_name = self._get_clip_overlay_meta(cam.camera_id, now)
+                    dets = self._latest_detections.get(cam.camera_id)
+                    annotated = frame.copy()
+                    if dets:
+                        draw_boxes(annotated, dets)
+                    left_str = format_camera_time_str(
+                        cam_name, datetime.now(timezone.utc).isoformat(), tz_name)
+                    draw_info_bar(annotated, left_str, dets)
+                    self._clip_buffers[cam.camera_id].push(annotated)
                     self._last_clip_push[cam.camera_id] = now
                     with self._clip_lock:
                         cam_writers = dict(self._clip_writers.get(cam.camera_id, {}))
                     for w in cam_writers.values():
-                        w.write_frame(frame)
+                        w.write_frame(annotated)
             # ---
 
             if has_motion:
@@ -897,13 +925,7 @@ class DetectionPipeline:
             threading.Thread(target=_persist, daemon=True).start()
 
     def _annotate(self, frame, detections):
-        for d in detections:
-            x1, y1, x2, y2 = d.bbox
-            color = CATEGORY_COLORS_BGR.get(d.category, (128, 128, 128))
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, f"{d.label} {d.confidence:.0%}", (x1, y1 - 8),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-        return frame
+        return draw_boxes(frame, detections)
 
     def _save_image(self, frame, camera_id, ts, detections=None):
         db = sqlite3.connect(cfg.db_path)
@@ -912,39 +934,9 @@ class DetectionPipeline:
         db.close()
         tz_name = tz_row[0] if tz_row else 'UTC'
         cam_name = (cam_row[0] if cam_row and cam_row[0] else f"Camera {camera_id}")
-        try:
-            tz = ZoneInfo(tz_name) if tz_name != 'UTC' else timezone.utc
-        except ZoneInfoNotFoundError:
-            tz = timezone.utc
 
-        dt = datetime.fromisoformat(ts).astimezone(tz)
-        hour = dt.strftime('%I').lstrip('0') or '12'
-        time_str = dt.strftime(f'%a %b {dt.day}, %Y  {hour}:%M %p %Z')
-
-        if detections:
-            parts = [f"{d.label}  {round(d.confidence * 100)}%" for d in detections]
-            det_str = '   |   '.join(parts)
-        else:
-            det_str = ''
-
-        h, w = frame.shape[:2]
-        bar_h = 36
-        cv2.rectangle(frame, (0, h - bar_h), (w, h), (40, 40, 40), -1)
-
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        scale, thick = 0.48, 1
-        fg = (210, 210, 210)
-        text_y = h - bar_h + 24
-
-        left_str = f"{cam_name}  -  {time_str}"
-        cv2.putText(frame, left_str, (8, text_y), font, scale, fg, thick, cv2.LINE_AA)
-
-        if det_str:
-            (tw, _), _ = cv2.getTextSize(det_str, font, scale, thick)
-            if tw > w // 2:
-                det_str = parts[0] + (f'  +{len(parts) - 1} more' if len(parts) > 1 else '')
-                (tw, _), _ = cv2.getTextSize(det_str, font, scale, thick)
-            cv2.putText(frame, det_str, (w - tw - 8, text_y), font, scale, fg, thick, cv2.LINE_AA)
+        left_str = format_camera_time_str(cam_name, ts, tz_name)
+        draw_info_bar(frame, left_str, detections)
 
         safe_ts = ts.replace(":", "-").replace(".", "-")
         path = Path(get_active_images_dir()) / f"cam{camera_id}_{safe_ts}.jpg"
