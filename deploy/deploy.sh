@@ -76,6 +76,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable nomad-eye-backend nomad-eye-network
 sudo systemctl restart nomad-eye-backend nomad-eye-network
 
+# Install NetworkManager dispatcher script for captive-portal redirect during hotspot mode
+sudo cp "$REPO_DIR/deploy/99-nomadeye-captive" /etc/NetworkManager/dispatcher.d/99-nomadeye-captive
+sudo chmod +x /etc/NetworkManager/dispatcher.d/99-nomadeye-captive
+
 # Grant nomadeye operator access to Tailscale (no sudo needed for tailscale commands)
 if command -v tailscale &>/dev/null; then
     sudo tailscale set --operator=nomadeye

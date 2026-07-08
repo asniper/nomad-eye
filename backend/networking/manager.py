@@ -102,9 +102,11 @@ def start_access_point():
                     "802-11-wireless-security.key-mgmt", "wpa-psk",
                     "802-11-wireless-security.psk", cfg.ap_password,
                     "ipv4.method", "shared"], capture_output=True)
-    subprocess.run(["/usr/bin/nmcli", "con", "up", "NomadEye-AP"],
-                   capture_output=True, timeout=30)
-    _captive_up()
+    try:
+        subprocess.run(["/usr/bin/nmcli", "con", "up", "NomadEye-AP"],
+                       capture_output=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def stop_access_point():
@@ -137,7 +139,8 @@ def is_connected() -> bool:
         ["/usr/bin/nmcli", "-t", "-f", "STATE", "general"],
         capture_output=True, text=True
     )
-    return "connected" in result.stdout
+    state = result.stdout.strip()
+    return "connected" in state and "disconnected" not in state
 
 
 def is_ap_active() -> bool:
@@ -202,10 +205,13 @@ async def auto_connect_loop():
             available = nmcli("-t", "-f", "SSID", "dev", "wifi", "list")
             for ssid in available.splitlines():
                 if ssid in known_ssids:
-                    subprocess.run(
-                        ["/usr/bin/nmcli", "con", "up", ssid],
-                        capture_output=True, timeout=30
-                    )
+                    try:
+                        subprocess.run(
+                            ["/usr/bin/nmcli", "con", "up", ssid],
+                            capture_output=True, timeout=30
+                        )
+                    except subprocess.TimeoutExpired:
+                        continue
                     if is_connected():
                         break
             else:

@@ -258,7 +258,7 @@ export default function Setup() {
                 <li>Open your browser and go to:</li>
               </ol>
               <div className="bg-[#1A1A1A] rounded-lg px-4 py-3 text-center">
-                <p className="font-mono font-semibold text-lg" style={{ color: '#FFB800' }}>http://{hostname}.local:8000</p>
+                <p className="font-mono font-semibold text-lg" style={{ color: '#FFB800' }}>http://{hostname}.local</p>
                 <p className="text-gray-600 text-xs mt-1">Login: admin / nomadeye</p>
               </div>
             </div>
@@ -289,7 +289,7 @@ export default function Setup() {
             <div>
               <h2 className="text-xl font-bold text-white">Hotspot Off</h2>
               <p className="text-gray-400 text-sm mt-1">Reconnect to your WiFi, then visit:</p>
-              <p className="font-mono font-semibold text-lg mt-3" style={{ color: '#FFB800' }}>http://{hostname}.local:8000</p>
+              <p className="font-mono font-semibold text-lg mt-3" style={{ color: '#FFB800' }}>http://{hostname}.local</p>
               <p className="text-gray-600 text-xs mt-2">Login: admin / nomadeye</p>
             </div>
           </div>

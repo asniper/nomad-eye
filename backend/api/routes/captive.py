@@ -14,8 +14,8 @@ def _ap_url() -> str:
         if line.startswith("IP4.ADDRESS"):
             val = line.split(":", 1)[-1].strip()
             if val:
-                return f"http://{val.split('/')[0]}:8000/setup"
-    return "http://10.42.0.1:8000/setup"
+                return f"http://{val.split('/')[0]}/setup"
+    return "http://10.42.0.1/setup"
 
 
 @router.get("/hotspot-detect.html")

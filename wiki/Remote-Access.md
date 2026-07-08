@@ -73,7 +73,7 @@ To give another person access to your Nomad Eye device without adding them to yo
 4. Enter the Tailscale account email of the person you want to share with
 5. They accept the share in their Tailscale client — the device appears in their network
 
-Shared users can access `http://<tailscale-ip>:8000` using the web UI login. They still need valid Nomad Eye credentials; Tailscale only provides the network path.
+Shared users can access `http://<tailscale-ip>` using the web UI login. They still need valid Nomad Eye credentials; Tailscale only provides the network path.
 
 ---
 
@@ -93,4 +93,4 @@ If the device has no network connection (e.g., first setup, moved to a new locat
 
 **Settings → WiFi → Start Hotspot**
 
-Connect your phone or laptop to the hotspot SSID, then open `http://192.168.4.1:8000` to access the UI and configure WiFi.
+Connect your phone or laptop to the hotspot SSID, then open `http://10.42.0.1` to access the UI and configure WiFi.

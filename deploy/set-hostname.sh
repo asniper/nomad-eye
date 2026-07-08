@@ -40,5 +40,5 @@ systemctl restart avahi-daemon
 
 echo ""
 echo "Done. Device is now reachable at:"
-echo "  http://nomadeye.local:8000"
+echo "  http://nomadeye.local"
 echo "  (may take a few seconds to propagate on the network)"
