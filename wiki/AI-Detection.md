@@ -1,6 +1,6 @@
 # AI Detection
 
-Nomad Eye uses YOLO-based object detection models running on-device via ONNX. No internet connection is required for inference.
+Nomad Eye runs several on-device object detection models: standard YOLO models, open-vocabulary YOLOWorld, and MegaDetector (all PyTorch, via `ultralytics`/`yolov5`), plus optional open-vocabulary transformer models (OWLv2, Grounding DINO, via `transformers`). An `.onnx` export of the active model is used automatically for a speed boost if one is present alongside the `.pt` weights and its input shape matches. No internet connection is required for inference once a model is downloaded.
 
 ---
 
@@ -12,14 +12,16 @@ Nomad Eye uses YOLO-based object detection models running on-device via ONNX. No
 | `yolov8s` | 80 COCO | Yes | Yes | Fast | Better | Good balance on ARM. |
 | `yolov8m` | 80 COCO | Yes | Yes | Slow | Best | Not recommended on ARM. |
 | `yolov8s-worldv2` / YOLOWorld | Custom (open-vocab) | Yes | Yes | Moderate | Good | Define your own detection classes. |
-| MegaDetector v5 | Wildlife | No | Yes | Moderate | Excellent | x86-64 only. Best for wildlife cameras. |
-| OWLv2 / Grounding DINO | Custom (open-vocab) | No | Yes | Slow | Excellent | x86-64 only. Requires ~2 GB extra (transformers). |
+| MegaDetector v5 | Wildlife | No | Yes | Moderate | Excellent | Best for wildlife cameras. ~220 MB download on first use. |
+| OWLv2 / Grounding DINO | Custom (open-vocab) | No | Yes | Slow | Excellent | Requires manually running `pip install transformers` (~2 GB) in the backend venv first — the app does not install this for you. |
+
+The ARM64/x86-64 column is advisory, not enforced: the UI greys out MegaDetector/OWLv2/Grounding DINO on ARM because they're impractically slow there (OWLv2/DINO can take 10–30s per scan on CPU), not because the code refuses to run them.
 
 ---
 
 ## Selecting a Model
 
-**Settings → AI Model → Select Model**
+**Settings → Detection → Detection Model**
 
 After changing the model, the detection pipeline restarts automatically. On ARM devices, stick to `yolov8n` or `yolov8s`. The `m` variant is noticeably slower and typically not worth the accuracy gain for live video.
 
@@ -40,9 +42,9 @@ You can filter notifications by category without filtering detection — all cla
 
 ## Open-Vocab Classes (YOLOWorld)
 
-YOLOWorld (`yolov8s-worldv2`) lets you define arbitrary text-based classes instead of being limited to COCO-80.
+YOLOWorld (`yolov8s-worldv2`), OWLv2, and Grounding DINO all let you define arbitrary text-based classes instead of being limited to COCO-80 — the same class list setting applies to whichever open-vocabulary model is active.
 
-**Settings → AI Model → YOLOWorld Classes**
+**Settings → Detection → Detection Model → Detection classes**
 
 Enter a comma-separated list of class names:
 
@@ -58,9 +60,7 @@ Keep the list short (under 20 classes) for best performance. Vague or overlappin
 
 The confidence threshold determines how certain the model must be before registering a detection. Lower values catch more (including false positives); higher values only report high-confidence detections.
 
-**Global threshold:** Set in `.env` as `DETECTION_CONFIDENCE`, or in **Settings → Detection → Confidence**.
-
-**Per-category thresholds:** You can override the global threshold per class in **Settings → Detection → Category Thresholds**. For example, set `person` to 0.6 and `bird` to 0.8 to reduce false positives from birds.
+There's one threshold per category (people, vehicles, animals, other, faces) — no single global value. Adjust them in **Settings → Detection → Confidence thresholds**. For example, set `person` to 0.6 and `animals` to 0.8 to reduce false positives from wildlife.
 
 Typical values:
 
@@ -76,18 +76,18 @@ Typical values:
 
 Detection inference only runs when motion is detected first. This saves CPU significantly.
 
-`MOTION_THRESHOLD` is the number of changed pixels between frames required to trigger inference. Default is `500`.
+Motion threshold is the pixel-change area required to trigger inference. The shipped default is `100`, not the `500` fallback baked into the code — a fresh install seeds the lower value.
 
 - Too low → inference runs constantly, high CPU
 - Too high → slow-moving subjects (approaching person) may not trigger
 
-Adjust in **Settings → Detection → Motion Threshold** or via `.env`.
+Adjust in **Settings → Detection → Motion threshold**. Vehicles have an extra built-in filter — a vehicle bounding box only counts as a real detection if at least 5% of its area shows actual pixel motion, so a parked car sitting in frame doesn't create endless events. This filter doesn't apply to faces, which are exempt from motion gating entirely (they still require the camera's motion detector to have fired at all, per [Face Recognition](Face-Recognition)).
 
 ---
 
 ## ARM vs x86-64 Performance
 
-On ARM64 (e.g., Arduino Uno Q) without a GPU, inference runs on the CPU via ONNX Runtime.
+On ARM64 (e.g., Arduino Uno Q) without a GPU, inference runs on the CPU via PyTorch (through `ultralytics`), or via ONNX Runtime if a matching `.onnx` export is present.
 
 | Model | Approx. inference time (ARM64, single camera) |
 |---|---|
@@ -97,7 +97,7 @@ On ARM64 (e.g., Arduino Uno Q) without a GPU, inference runs on the CPU via ONNX
 
 At these speeds, yolov8n and yolov8s can comfortably keep up with 15fps streams. yolov8m will cause frame-level delays.
 
-x86-64 machines are generally fast enough for any model. If a GPU is available, ONNX Runtime will use it automatically.
+x86-64 machines are generally fast enough for any model.
 
 ---
 
@@ -105,9 +105,8 @@ x86-64 machines are generally fast enough for any model. If a GPU is available, 
 
 When a detection passes the confidence threshold:
 
-1. A snapshot image is saved to `IMAGES_DIR`
-2. The pre-event video buffer is flushed to `CLIPS_DIR` (default: last 5 seconds)
-3. Recording continues for `CLIP_SECONDS_AFTER` (default: 5 seconds)
-4. Any matching notification rules are evaluated and fired
+1. A snapshot image is saved, overlaid with the camera name, timestamp, and detection labels
+2. Any matching notification rules are evaluated and fired
+3. If video clip recording is enabled (Settings → Storage → Video Clips — off by default), the pre-roll buffer (default: last 5 seconds) is written to the clip and recording continues for the post-roll duration (default: 10 seconds after the last motion) with the same overlay burned into every frame
 
-Events are viewable in **Detections** in the web UI, with the snapshot and a clip player.
+Events are viewable in **Detections** in the web UI, with the snapshot and, if recorded, a clip player.

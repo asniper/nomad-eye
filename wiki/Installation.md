@@ -7,11 +7,12 @@
 **System packages** (installed automatically by deploy.sh):
 
 ```
-python3  python3-venv  nodejs  npm  git
-libopencv-dev  python3-opencv  network-manager  curl  ffmpeg
+python3  python3-pip  python3-venv  nodejs  npm  git
+libopencv-dev  python3-opencv  network-manager  curl  nginx  ffmpeg  arp-scan
 ```
 
 `ffmpeg` is used to convert recorded clips to H.264 so they play in all browsers.
+`nginx` reverse-proxies port 80 to the backend. `arp-scan` is used for presence detection.
 
 Your device must be running Debian or Ubuntu Linux. The deploy script uses `apt`.
 
@@ -32,101 +33,142 @@ Your device must be running Debian or Ubuntu Linux. The deploy script uses `apt`
 curl -fsSL https://raw.githubusercontent.com/asniper/nomad-eye/main/deploy/deploy.sh | sudo bash
 ```
 
-This handles everything: installing system deps, cloning the repo, building the frontend, downloading the default AI model, creating the data directories, installing and starting the systemd service.
+This handles everything: creating the service user, installing system deps, cloning the
+repo, installing Python/Node dependencies, downloading the default AI model, building the
+frontend, creating the data directories, configuring sudoers, installing and starting both
+systemd services (backend + network/hotspot-fallback), installing the NetworkManager
+captive-portal dispatcher script, and configuring nginx.
 
 ---
 
 ## Manual Install
 
-Follow these steps if you want to understand or customize the install process.
+Follow these steps if you want to understand or customize the install process. Everything
+under `/opt/nomad-eye` runs as the `nomadeye` user, so create it first.
 
-### 1. Install system dependencies
-
-```bash
-sudo apt update
-sudo apt install -y python3 python3-venv nodejs npm git \
-    libopencv-dev python3-opencv network-manager curl ffmpeg
-```
-
-### 2. Clone the repository
-
-```bash
-sudo git clone https://github.com/asniper/nomad-eye /opt/nomad-eye
-```
-
-If the directory already exists (updating), run `git pull` instead:
-
-```bash
-cd /opt/nomad-eye && sudo git pull
-```
-
-### 3. Set up the Python virtual environment
-
-```bash
-cd /opt/nomad-eye
-python3 -m venv backend/venv
-backend/venv/bin/pip install -r backend/requirements.txt
-```
-
-### 4. Download the default AI model
-
-```bash
-mkdir -p /opt/nomad-eye/models
-curl -L https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.onnx \
-    -o /opt/nomad-eye/models/yolov8n.onnx
-```
-
-### 5. Build the frontend
-
-```bash
-cd /opt/nomad-eye/frontend
-npm install
-npm run build
-```
-
-### 6. Create data directories
-
-```bash
-mkdir -p /opt/nomad-eye/data/images \
-         /opt/nomad-eye/data/clips \
-         /opt/nomad-eye/data/db
-```
-
-### 7. Install the systemd service
-
-```bash
-sudo cp /opt/nomad-eye/deploy/nomad-eye-backend.service \
-        /etc/systemd/system/nomad-eye-backend.service
-sudo systemctl daemon-reload
-sudo systemctl enable nomad-eye-backend
-sudo systemctl start nomad-eye-backend
-```
-
----
-
-## Service User
-
-The app runs as a dedicated `nomadeye` system user with no general sudo access. This user must exist on the device before the services start. The deploy script creates it automatically. For manual installs:
+### 1. Create the service user
 
 ```bash
 sudo useradd -m -s /bin/bash \
     -G video,audio,dialout,input,render,netdev,bluetooth,gpiod,adm \
     nomadeye
-sudo chown -R nomadeye:nomadeye /opt/nomad-eye
 ```
 
 The `video` group is required for camera device access (`/dev/video*`).
 
+### 2. Install system dependencies
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-pip python3-venv nodejs npm git \
+    libopencv-dev python3-opencv network-manager curl nginx ffmpeg arp-scan
+```
+
+### 3. Clone the repository
+
+```bash
+sudo git clone https://github.com/asniper/nomad-eye /opt/nomad-eye
+sudo chown -R nomadeye:nomadeye /opt/nomad-eye
+```
+
+If the directory already exists (updating), run this instead:
+
+```bash
+cd /opt/nomad-eye && sudo -u nomadeye git pull
+```
+
+### 4. Set up the Python virtual environment
+
+```bash
+cd /opt/nomad-eye
+sudo -u nomadeye python3 -m venv backend/venv
+sudo -u nomadeye backend/venv/bin/pip install --upgrade pip
+sudo -u nomadeye backend/venv/bin/pip install -r backend/requirements.txt
+```
+
+### 5. Pre-download the default AI model
+
+This lets ultralytics fetch `yolov8n.pt` once now, so the device doesn't need internet
+access the first time detection runs:
+
+```bash
+cd /opt/nomad-eye/backend
+sudo -u nomadeye venv/bin/python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
+```
+
+### 6. Build the frontend
+
+```bash
+cd /opt/nomad-eye/frontend
+sudo -u nomadeye npm install
+sudo -u nomadeye npm run build
+```
+
+### 7. Create data directories
+
+```bash
+sudo -u nomadeye mkdir -p /opt/nomad-eye/data/images \
+         /opt/nomad-eye/data/clips \
+         /opt/nomad-eye/data/db
+```
+
+### 8. Configure the sudo helper
+
+See [Sudo Helper Setup](#sudo-helper-setup) below — required before starting the services,
+since the storage/network/system-control features depend on it.
+
+### 9. Install and start the systemd services
+
+```bash
+sudo cp /opt/nomad-eye/deploy/nomad-eye-backend.service /etc/systemd/system/
+sudo cp /opt/nomad-eye/deploy/nomad-eye-network.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable nomad-eye-backend nomad-eye-network
+sudo systemctl restart nomad-eye-backend nomad-eye-network
+```
+
+`nomad-eye-network` runs the WiFi auto-connect/hotspot-fallback loop; `nomad-eye-backend`
+is the FastAPI app (bound to `127.0.0.1:8080`, not reachable directly — see step 11).
+
+### 10. Install the captive-portal dispatcher script
+
+Needed so a device connecting to the setup hotspot gets redirected to the setup page:
+
+```bash
+sudo cp /opt/nomad-eye/deploy/99-nomadeye-captive /etc/NetworkManager/dispatcher.d/99-nomadeye-captive
+sudo chmod +x /etc/NetworkManager/dispatcher.d/99-nomadeye-captive
+```
+
+### 11. Configure nginx
+
+The backend only listens on `127.0.0.1:8080` — nginx is what exposes the UI on port 80:
+
+```bash
+sudo cp /opt/nomad-eye/deploy/nginx.conf /etc/nginx/sites-available/nomad-eye
+sudo ln -sf /etc/nginx/sites-available/nomad-eye /etc/nginx/sites-enabled/nomad-eye
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl enable nginx && sudo systemctl restart nginx
+```
+
+---
+
 ## Sudo Helper Setup
 
-Storage and network management features require `nomadeye` to run a privileged helper script. Add these lines to `/etc/sudoers.d/nomadeye` (mode 0440):
+Storage and network management features require `nomadeye` to run a privileged helper
+script. Add these lines to `/etc/sudoers.d/nomadeye` (mode 0440):
 
 ```
 nomadeye ALL=(ALL) NOPASSWD: /opt/nomad-eye/storage-helper.sh
 nomadeye ALL=(ALL) NOPASSWD: /usr/bin/timedatectl
 ```
 
-The helper script handles: service restart, device reboot, mounting/unmounting storage devices, and formatting drives as ext4. It does not grant general sudo access.
+The actual script lives at `deploy/storage-helper.sh`; the backend creates a symlink at
+`/opt/nomad-eye/storage-helper.sh` automatically on first start (so the sudoers path above
+always resolves), no manual copy needed.
+
+The helper script handles: service restart, device reboot, mounting/unmounting storage
+devices, formatting drives as ext4, and ARP scans for presence detection. It does not grant
+general sudo access.
 
 ---
 
@@ -144,7 +186,7 @@ Open a browser and go to:
 http://<device-ip>
 ```
 
-The web UI should load. Log in with the default credentials:
+The web UI should load (served by nginx on port 80). Log in with the default credentials:
 
 | Field | Default |
 |---|---|

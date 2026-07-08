@@ -9,11 +9,10 @@ Nomad Eye uses OpenCV to capture from UVC-compatible USB cameras. Most modern US
 1. Plug the USB camera into your device.
 2. The camera should appear as a `/dev/video*` device (e.g., `/dev/video0`).
 3. Open the web UI → **Cameras**.
-4. Click **Scan for Cameras** — Nomad Eye will detect available video devices.
-5. Click **Enable** on the camera you want to use.
-6. Give it a name (e.g., "Front Door") and click **Save**.
+4. Click **Detect Cameras** — Nomad Eye will scan for and add any new video devices, already enabled and streaming.
+5. Give it a name (e.g., "Front Door") and click **Save**.
 
-The camera will begin streaming immediately. If it doesn't appear, see [Troubleshooting](Troubleshooting).
+Newly-detected cameras start enabled and streaming automatically — there's no separate "Enable" step unless you'd previously disabled it. If it doesn't appear at all, see [Troubleshooting](Troubleshooting).
 
 ---
 
@@ -29,9 +28,12 @@ USB cameras share bandwidth on the USB bus. This becomes a problem when connecti
 
 **To reduce bandwidth per camera:**
 
-- Lower the resolution in camera settings (480p is fine for most detection use cases)
-- Lower the frame rate (15fps is adequate for detection; motion buffer still records at full rate)
+- Lower the resolution/frame rate in Settings → Detection → Cameras — this is a global setting applied to every camera, and it only takes effect while AI detection is off (AI mode forces 1280×720 @ 15fps for accurate detection)
 - Use multiple USB controllers if available — check with `lsusb -t`
+
+Nomad Eye also requests MJPEG capture by default, which cuts USB bandwidth roughly 30x versus raw YUYV — if a camera doesn't support it, capture automatically falls back to raw format after repeated read failures.
+
+Recorded event clips are always downsampled to 640×360 @ 5fps regardless of the camera's live capture settings, so lowering clip quality isn't an option — only the live stream/detection resolution is adjustable.
 
 If you see frozen frames, stuttering, or OpenCV errors in the logs, USB bandwidth is the most common cause.
 
@@ -54,23 +56,23 @@ For each camera you can configure:
 | Setting | Description |
 |---|---|
 | **Name** | Display name shown in the UI and used in notification messages |
-| **Resolution** | Capture resolution; lower = less CPU and USB bandwidth |
-| **Frame rate** | Capture FPS; 15fps is usually enough for detection |
-| **Rotation** | Rotate the stream 0°, 90°, 180°, or 270° if the camera is mounted sideways |
-| **Detection enabled** | Run AI detection on this camera's stream |
-| **Motion detection** | Trigger on pixel-level motion before running AI inference |
+| **Enabled** | Toggle the camera's stream and detection pipeline on/off |
+| **Face detection** | Per-camera enable/disable for face recognition |
+| **Face sensitivity** | `fast` / `normal` / `thorough` — trades face-detection accuracy for CPU |
+| **Night mode** | Hardware IR (on supported cameras) or software night-vision processing |
+| **Image adjustments** | Hardware (v4l2) or software brightness/contrast controls |
+
+Resolution, frame rate, and AI detection on/off are **global** settings, not per-camera — see Settings → Detection. Motion detection always runs on every camera (there's no per-camera on/off); only its global sensitivity (motion threshold/scale) is adjustable. There's no rotation control.
 
 ---
 
-## Reloading Cameras
+## Reloading and Resetting a Camera
 
-If you unplug and replug a camera, or connect a new one, use **Cameras → Reload** to re-scan without restarting the service.
+**Reload** (on the camera's card) closes and reopens the OpenCV capture handle — use this if a camera gets into a bad state (stream shows black, high CPU) or after unplugging and replugging it. It's faster than a full service restart.
 
----
+**Reset AI** clears that camera's motion-tracking state (active events, motion bounding box) without touching the capture handle — use it if detection/overlay state looks stuck.
 
-## Resetting a Camera
-
-If a camera gets into a bad state (stream shows black, high CPU), use **Cameras → Reset** to close and reopen the OpenCV capture handle. This is faster than a full service restart.
+To scan for a newly-connected camera, use **Detect Cameras** at the top of the Cameras page — this is a global rescan, not a per-camera action.
 
 ---
 

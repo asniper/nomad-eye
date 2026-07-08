@@ -6,7 +6,7 @@
 
 The camera is triggering (motion threshold is passed) but the AI model is not labeling anything.
 
-**Check confidence threshold.** If `DETECTION_CONFIDENCE` is set too high, valid detections are silently dropped. Try lowering it to `0.35` and see if labels appear.
+**Check confidence threshold.** If a category's confidence threshold (Settings → Detection → Confidence thresholds) is set too high, valid detections are silently dropped. Try lowering it to `0.35` and see if labels appear.
 
 ```bash
 /opt/nomad-eye/backend/venv/bin/python -c "
@@ -16,22 +16,16 @@ print(db.execute(\"SELECT value FROM app_config WHERE key='confidence_people'\")
 "
 ```
 
-**Check the active model.** If the model was recently changed, verify it downloaded correctly:
+**Check the active model.** If the model was recently changed and detection stopped working, re-select it from Settings → Detection → Detection Model — this re-triggers the download/load. Check logs for a failed download or load error:
 
 ```bash
-ls -lh /opt/nomad-eye/models/
+journalctl -u nomad-eye-backend -n 100 --no-pager | grep -i "model\|onnx\|failed to load"
 ```
 
-A missing or zero-byte model file will cause silent inference failures. Re-download:
+**ONNX shape mismatch.** An optional `.onnx` sibling of the active `.pt` model (e.g. `/opt/nomad-eye/backend/yolov8n.onnx` next to `yolov8n.pt`) is used automatically if present and its input shape matches — if you dropped in a mismatched `.onnx` file, remove it so the `.pt` model loads instead, then restart the service:
 
 ```bash
-curl -L https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.onnx \
-    -o /opt/nomad-eye/models/yolov8n.onnx
-```
-
-**ONNX shape mismatch.** If you switched between models and see shape-related errors in the logs, restart the service to fully reload the inference engine:
-
-```bash
+rm /opt/nomad-eye/backend/yolov8n.onnx
 sudo systemctl restart nomad-eye-backend
 ```
 
@@ -45,7 +39,7 @@ journalctl -u nomad-eye-backend -n 100 --no-pager | grep -i onnx
 
 ## Face detection not working
 
-**Check that Faces is the only enabled category.** For best results use faces-only mode: disable people, vehicles, animals, and other in Settings → AI. This skips YOLO and runs face detection at higher resolution.
+**Check that Faces is the only enabled category.** For best results use faces-only mode: disable people, vehicles, animals, and other in Settings → Detection → Confidence thresholds. This skips YOLO and runs face detection at higher resolution.
 
 **Face detection requires motion to trigger.** Face detection only runs when the camera's motion detector fires. If the scene is completely static (no movement at all), face detection won't run. Slight movement (walking in, adjusting position) is enough to trigger it.
 
@@ -61,7 +55,7 @@ If this fails, install it (takes 5–15 min to compile dlib):
 sudo /opt/nomad-eye/backend/venv/bin/pip install face_recognition
 ```
 
-**No faces stored in the library.** If no known faces are saved, all detected faces are labelled "Unknown" — they still show in the overlay and create events. Go to People → Face Library to name them.
+**No faces stored in the library.** If no known faces are saved, all detected faces are labelled "Unknown" — they still show in the overlay and create events. Go to Settings → Faces to name them.
 
 **Poor detection with glasses or IR/night vision.** The system applies CLAHE contrast enhancement before HOG face detection, which helps significantly. For best recognition accuracy, also add face samples captured with glasses and under IR conditions — the system saves unrecognized faces automatically as "Unknown" candidates that you can rename.
 
@@ -69,11 +63,11 @@ sudo /opt/nomad-eye/backend/venv/bin/pip install face_recognition
 
 ## Detection is very slow
 
-**ARM device + heavy model.** The `yolov8m` model is too slow for real-time use on ARM64. Switch to `yolov8n` or `yolov8s` in Settings → AI Model.
+**ARM device + heavy model.** The `yolov8m` model is too slow for real-time use on ARM64. Switch to `yolov8n` or `yolov8s` in Settings → Detection → Detection Model.
 
 **Multiple cameras with detection enabled.** Each camera runs its own detection pipeline. On devices with 2–4 CPU cores, more than 2 cameras with full AI detection will saturate the CPU. Disable detection on secondary cameras or lower their resolution.
 
-**Face recognition overhead.** Face recognition adds significant CPU time when persons are detected. Disable it if you don't need it: Settings → AI → Face Recognition → Disable.
+**Face recognition overhead.** Face recognition adds significant CPU time when persons are detected. It's a per-camera setting — disable it on cameras that don't need it from the Cameras page (face detection toggle on each camera card), or use the Sensitivity setting there to trade accuracy for speed.
 
 Check CPU usage:
 
@@ -134,7 +128,7 @@ journalctl -u nomad-eye-backend -n 200 --no-pager
 |---|---|---|
 | `No such file or directory: backend/venv` | venv not created | Run `python3 -m venv /opt/nomad-eye/backend/venv && /opt/nomad-eye/backend/venv/bin/pip install -r /opt/nomad-eye/backend/requirements.txt` |
 | `ModuleNotFoundError` | pip install incomplete | Re-run pip install in the venv |
-| `Address already in use` | Port 80 is occupied | `sudo lsof -i ` to find the conflicting process |
+| `Address already in use` | Port 8080 is occupied (the backend binds `127.0.0.1:8080`; nginx is the separate process serving port 80) | `sudo lsof -i :8080` to find the conflicting process |
 | `Permission denied` on data dir | Data directories owned by wrong user | `sudo chown -R nomadeye:nomadeye /opt/nomad-eye/data` |
 | `.env` parse error | Malformed .env file | Check `/opt/nomad-eye/.env` for syntax errors |
 
@@ -154,13 +148,13 @@ sudo systemctl restart nomad-eye-backend
 tailscale status
 ```
 
-If it shows `Stopped` or `Logged out`, reconnect from the UI: Settings → Remote Access → Tailscale → Connect Account, or from the command line:
+If it shows `Stopped` or `Logged out`, reconnect from the UI: Settings → Network → Connect Account, or from the command line:
 
 ```bash
 sudo tailscale up
 ```
 
-**AP/hotspot mode active.** If the device is in hotspot mode (no network), Tailscale won't be connected. Connect the device to WiFi first via the captive portal (connect to the hotspot SSID and go to `http://192.168.4.1`).
+**AP/hotspot mode active.** If the device is in hotspot mode (no network), Tailscale won't be connected. Connect the device to WiFi first via the captive portal (connect to the hotspot SSID and go to `http://10.42.0.1`).
 
 **Firewall.** Check that port 80 is not blocked if you're accessing via a local network. Tailscale tunnels do not require open ports.
 

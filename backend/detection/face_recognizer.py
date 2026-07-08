@@ -28,6 +28,7 @@ _AUTO_SAVE_CONF_FR   = 0.72   # minimum confidence to auto-save a new sample (dl
 _AUTO_SAVE_CONF_HIST = 0.90   # minimum confidence to auto-save a new sample (haar)
 _AUTO_SAVE_MIN_DIST  = 0.25   # new encoding must differ by at least this from all existing samples for that person
 _MAX_SAMPLES_PER_PERSON = 30  # cap on auto-saved encodings per named person
+_MAX_UNKNOWN_SAMPLES = 200    # cap on total 'Unknown' rows — strangers otherwise accumulate forever
 
 # Global semaphore: only one face-detection call at a time across all cameras.
 # Prevents concurrent dlib HOG calls from saturating all CPU cores.
@@ -288,6 +289,20 @@ class FaceRecognizer:
                 "INSERT INTO known_faces (name, encoding, image_path, created_at) VALUES (?,?,?,?)",
                 ('Unknown', enc_bytes, img_path, datetime.now(timezone.utc).isoformat())
             )
+            # Evict oldest 'Unknown' rows beyond the cap — without this, every
+            # sufficiently-different stranger (mail carrier, passersby, etc.) accumulates
+            # a permanent row forever.
+            stale = db.execute(
+                "SELECT id, image_path FROM known_faces WHERE name='Unknown' "
+                "ORDER BY id DESC LIMIT -1 OFFSET ?", (_MAX_UNKNOWN_SAMPLES,)
+            ).fetchall()
+            for stale_id, stale_path in stale:
+                if stale_path:
+                    try:
+                        os.remove(stale_path)
+                    except OSError:
+                        pass
+                db.execute("DELETE FROM known_faces WHERE id=?", (stale_id,))
             db.commit()
             db.close()
             self._reload_from_db()

@@ -17,7 +17,7 @@ The full system — backend, frontend, and AI — runs as a single systemd servi
 - YOLO AI detection (people, vehicles, animals, custom open-vocab classes)
 - Face recognition with a local face library
 - Live MJPEG streams with motion and detection overlay
-- Detection events saved as images + video clips (5s before/after)
+- Detection events saved as images + optional video clips (5s pre-roll / 10s post-roll by default)
 - SMS notifications via Twilio; email via SMTP
 - Rule-based notification filtering (category, time window, frequency)
 - WiFi management from the UI; captive portal hotspot for first-time setup
@@ -36,9 +36,9 @@ The full system — backend, frontend, and AI — runs as a single systemd servi
 | [Configuration](Configuration) | .env variables, database config keys, settings layering |
 | [Camera Setup](Camera-Setup) | Connecting USB cameras, USB bandwidth, enabling/disabling |
 | [AI Detection](AI-Detection) | All 6 models, confidence thresholds, open-vocab classes |
-| [Face Recognition](Face-Recognition) | Enabling, capturing faces, building a library, merging |
-| [Notifications](Notifications) | Twilio SMS, SMTP email, contacts, rules |
-| [Remote Access](Remote-Access) | Tailscale install, connect, node sharing |
+| [Face Recognition](Face-Recognition) | Enabling, the auto-built face library, assigning names |
+| [Notifications](Notifications) | ntfy, Twilio SMS, SMTP email, contacts, rules |
+| [Remote Access](Remote-Access) | Tailscale setup, connect, node sharing |
 | [Storage](Storage) | Internal vs external, mounting, formatting, purging |
 | [OTA Updates](OTA-Updates) | Update channels, manual check, auto-update |
 | [Troubleshooting](Troubleshooting) | Common issues and fixes |
@@ -51,8 +51,8 @@ The full system — backend, frontend, and AI — runs as a single systemd servi
 |---|---|
 | Repo | github.com/asniper/nomad-eye |
 | Install path | `/opt/nomad-eye/` |
-| Service name | `nomad-eye-backend.service` |
+| Service names | `nomad-eye-backend.service`, `nomad-eye-network.service` |
 | Service user | `nomadeye` |
-| Backend port | `80` (standard HTTP) |
+| Backend port | `8080` (behind nginx, which serves the UI on standard port `80`) |
 | Default credentials | `admin` / `nomadeye` |
 | License | MIT |

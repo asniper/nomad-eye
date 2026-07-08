@@ -1,6 +1,6 @@
 # Configuration
 
-All Nomad Eye settings are managed through the web UI and stored as key-value pairs in the SQLite database (`data/db/nomadeye.db`). There is no configuration file to edit — install the app, log in, and configure everything from Settings.
+Most Nomad Eye settings are managed through the web UI and stored as key-value pairs in the SQLite database (`data/db/nomadeye.db`) — install the app, log in, and configure everything from Settings. A small number of one-time bootstrap values (initial admin credentials, secret key) are read from an optional `.env` file at `/opt/nomad-eye/.env` instead — see [Installation](Installation).
 
 ---
 
@@ -8,14 +8,15 @@ All Nomad Eye settings are managed through the web UI and stored as key-value pa
 
 | Location | What you can configure |
 |---|---|
-| Settings → General | AI model, detection confidence, motion threshold, categories, clip length, timezone |
+| Settings → Detection | AI model, confidence thresholds, motion threshold/scale, detection interval, per-category enable, per-camera settings |
+| Settings → General | Device status, SMS/email/ntfy channel credentials (Twilio, SMTP, ntfy server) |
 | Settings → General → Presence Detection | Network presence scanning, watched devices, away timeout, status mapping |
-| Settings → General → ntfy Push Notifications | ntfy server URL, access token, enable/disable |
+| Settings → General → Notification Links | How links in notifications point back to the device (local IP / device name / Tailscale IP) |
 | Settings → Faces | Face recognition enable/disable, face library management |
-| Settings → Network | WiFi networks, hotspot mode, Tailscale, external access URL |
-| Settings → Storage | Primary storage location, external drive management, purge old data |
+| Settings → Network | WiFi networks, hotspot mode, Tailscale |
+| Settings → Storage | Primary storage location, external drive management, video clip recording (enable, pre-roll, post-roll), purge old data |
 | Settings → System | Timezone, admin password, OTA update channel and auto-update |
-| Notifications | ntfy, SMS, email contacts, notification rules, delivery log |
+| Notifications | Contacts, notification rules, delivery log |
 
 ---
 
@@ -31,7 +32,7 @@ sqlite3 /opt/nomad-eye/data/db/nomadeye.db "SELECT key, value FROM app_config;"
 
 | Key | Description |
 |---|---|
-| `admin_password` | Hashed admin password (set via Settings → System → Change Password) |
+| `admin_password` | Admin password, stored as plaintext (set via Settings → System → Change Password) |
 | `detection_model` | Active AI model (e.g. `yolov8n`, `yolov8s-worldv2`) |
 | `confidence_people` | Detection confidence threshold for people (0.0–1.0) |
 | `confidence_vehicles` | Detection confidence threshold for vehicles |
@@ -43,11 +44,13 @@ sqlite3 /opt/nomad-eye/data/db/nomadeye.db "SELECT key, value FROM app_config;"
 | `category_enabled_vehicles` | `1` / `0` |
 | `category_enabled_animals` | `1` / `0` |
 | `category_enabled_faces` | `1` / `0` |
-| `yoloworld_classes` | Comma-separated class names for YOLOWorld open-vocab detection |
-| `images_primary_device` | Device name (e.g. `sda1`) for image storage; empty = internal |
+| `category_enabled_other` | `1` / `0` — enable detection for uncategorized objects |
+| `detection_classes` | Comma-separated class names for open-vocabulary models (YOLOWorld, OWLv2, Grounding DINO) |
+| `storage_primary_device` | Device name (e.g. `sda1`) for image storage; empty = internal |
 | `clips_primary_device` | Device name for video clip storage; empty = internal |
 | `clips_purge_threshold` | Disk usage % that triggers auto-purge of old clips (default `90`) |
-| `external_url` | Base URL used in notification links (set to Tailscale IP for remote access) |
+| `notification_link_mode` | `local_ip` / `hostname` / `tailscale` — how the link in a notification points back to the device |
+| `notification_hostname` | Hostname used in the link when `notification_link_mode` is `hostname` |
 | `twilio_account_sid` | Twilio account SID for SMS notifications |
 | `twilio_auth_token` | Twilio auth token |
 | `twilio_from_number` | Twilio sending number (E.164 format, e.g. `+15551234567`) |

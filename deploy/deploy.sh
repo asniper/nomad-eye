@@ -43,15 +43,15 @@ sudo -u nomadeye bash -c "
     pip install -r '$REPO_DIR/backend/requirements.txt'
 "
 
-# Download YOLOv8n ONNX model
-MODEL_DIR="$REPO_DIR/models/yolo"
-sudo -u nomadeye mkdir -p "$MODEL_DIR"
-if [ ! -f "$MODEL_DIR/yolov8n.onnx" ]; then
-    echo "Downloading YOLOv8n model..."
-    sudo -u nomadeye curl -L \
-        "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.onnx" \
-        -o "$MODEL_DIR/yolov8n.onnx"
-fi
+# Pre-download the default YOLOv8n model weights so first boot doesn't need internet.
+# Uses ultralytics' own resolver (the same call ObjectDetector makes at runtime) instead
+# of a hand-built URL, so it's guaranteed to land wherever the running service looks.
+echo "Downloading YOLOv8n model..."
+sudo -u nomadeye bash -c "
+    cd '$REPO_DIR/backend' &&
+    source '$REPO_DIR/backend/venv/bin/activate' &&
+    python3 -c 'from ultralytics import YOLO; YOLO(\"yolov8n.pt\")'
+"
 
 # Build frontend
 cd "$REPO_DIR/frontend"

@@ -140,7 +140,7 @@ Each notification includes:
 - Camera name
 - Detection label and confidence
 - Timestamp
-- A direct link to the detection event in the web UI (uses `external_url` from Settings → Remote Access — set this to your Tailscale IP for remote access links)
+- A direct link to the detection event in the web UI (controlled by Settings → General → Notification Links — set the link mode to Tailscale IP so this link works from anywhere, see [Remote Access](Remote-Access))
 
 ntfy notifications also set a **priority** (high for people/faces, default for everything else) and a **click action** that opens the event directly.
 

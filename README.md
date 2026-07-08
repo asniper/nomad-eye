@@ -31,7 +31,7 @@ Self-hosted AI security camera system — runs entirely on-device, no cloud requ
 | OS | Debian/Ubuntu Linux |
 | Camera | UVC-compatible USB camera |
 
-Tested on the Arduino Uno Q (ARM64, Debian). x86-64 unlocks additional AI models (OWLv2, Grounding DINO, MegaDetector).
+Tested on the Arduino Uno Q (ARM64, Debian). The UI recommends x86-64 for a few additional AI models (OWLv2, Grounding DINO, MegaDetector) since they're impractically slow on ARM CPUs — see [AI Detection](../../wiki/AI-Detection) for details.
 
 ---
 

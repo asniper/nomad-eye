@@ -616,7 +616,12 @@ class DetectionPipeline:
                 continue
             last_frame_ts = frame_obj.timestamp
             frame = frame_obj.data
-            has_motion, motion_mask = motion_detector.detect(frame)
+            # Motion detection feeds only AI-gated paths (bbox overlay, YOLO triggers,
+            # periodic scan) — skip the background-subtraction pass entirely when AI is off.
+            if self._ai_enabled:
+                has_motion, motion_mask = motion_detector.detect(frame)
+            else:
+                has_motion, motion_mask = False, None
             now = time.time()
 
             # --- CLIP RING BUFFER & LIVE EXTENSION ---
@@ -916,8 +921,7 @@ class DetectionPipeline:
                 except Exception:
                     ip = None
                 try:
-                    for d, event_id in recs:
-                        self._store_detection_record(cam_id, d, ip, timestamp, event_id)
+                    self._store_detection_records(cam_id, recs, ip, timestamp)
                     if nd:
                         asyncio.run(dispatch_notification(cam_id, nd, ip, timestamp, feid))
                 except Exception:
@@ -944,11 +948,13 @@ class DetectionPipeline:
         cv2.imwrite(str(path), frame)
         return str(path)
 
-    def _store_detection_record(self, camera_id, detection, image_path, ts, event_id):
+    def _store_detection_records(self, camera_id, records, image_path, ts):
+        """Insert all detections from one screenshot in a single connection/commit."""
         db = sqlite3.connect(cfg.db_path)
-        db.execute(
+        db.executemany(
             "INSERT INTO detections (camera_id, category, label, confidence, image_path, timestamp, event_id) VALUES (?,?,?,?,?,?,?)",
-            (camera_id, detection.category, detection.label, detection.confidence, image_path, ts, event_id)
+            [(camera_id, d.category, d.label, d.confidence, image_path, ts, event_id)
+             for d, event_id in records]
         )
         db.commit()
         db.close()
