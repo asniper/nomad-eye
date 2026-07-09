@@ -87,9 +87,12 @@ After setting primary storage:
 
 - New images or clips write to the selected device's mount point (`/mnt/nomadeye-<id>/nomadeye/images/` or `.../clips/`)
 - Existing data on the previous primary storage is not moved automatically
-- If the drive is disconnected, Nomad Eye falls back to internal storage automatically and logs a warning
+- If the images drive is disconnected, Nomad Eye falls back to internal storage automatically
+- Clips are external-only — if the clips drive is disconnected or unmounted, clip/continuous recording simply stops (nothing is written to internal storage) until the drive is reconnected and mounted again
 
 To revert to internal storage: **Settings → Storage → Storage Location → Switch to Internal**
+
+Whichever devices are set as the images and/or clips primary are remembered across restarts — Nomad Eye automatically re-mounts them on startup, whether that's a service restart or a full device reboot, so recording resumes on the same drive without needing to re-mount it manually from Settings. If the drive isn't detected yet at startup (e.g. the kernel is still enumerating USB devices right after a reboot), it retries for about a minute before giving up.
 
 ---
 

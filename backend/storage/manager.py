@@ -2,6 +2,8 @@ import json
 import os
 import subprocess
 import sqlite3
+import threading
+import time
 from pathlib import Path
 from config.settings import get_settings
 
@@ -155,19 +157,45 @@ def unmount_device(device_name: str) -> tuple[bool, str]:
         return False, str(e)
 
 
-def auto_mount_primary() -> None:
+def _auto_mount_key(key: str) -> bool:
+    """Returns True if the device configured under `key` ends up mounted
+    (already was, or was just mounted). False if there's nothing configured
+    or the mount attempt failed."""
     try:
         db = sqlite3.connect(cfg.db_path)
-        row = db.execute("SELECT value FROM app_config WHERE key='storage_primary_device'").fetchone()
+        row = db.execute("SELECT value FROM app_config WHERE key=?", (key,)).fetchone()
         db.close()
     except Exception:
-        return
+        return False
     if not row or not row[0]:
-        return
+        return False
     device = row[0]
     if _get_mount_point(device):
-        return  # already mounted
-    mount_device(device)
+        return True  # already mounted
+    ok, _ = mount_device(device)
+    return ok
+
+
+def auto_mount_primary() -> None:
+    """Re-mount the configured images and clips primary devices on startup,
+    so recording resumes on the same external drive after a service or
+    device restart. Retries in the background for devices that aren't ready
+    yet — on a full reboot the kernel may not have finished enumerating a
+    USB drive by the time this service starts."""
+    keys = ('storage_primary_device', 'clips_primary_device')
+    pending = [k for k in keys if not _auto_mount_key(k)]
+    if not pending:
+        return
+
+    def _retry():
+        remaining = list(pending)
+        for _ in range(6):  # ~60s of retries
+            time.sleep(10)
+            remaining = [k for k in remaining if not _auto_mount_key(k)]
+            if not remaining:
+                return
+
+    threading.Thread(target=_retry, daemon=True, name='auto-mount-retry').start()
 
 
 def format_device(device_name: str) -> tuple[bool, str]:
