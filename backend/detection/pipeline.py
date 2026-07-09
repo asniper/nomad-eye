@@ -11,7 +11,7 @@ from camera.motion import MotionDetector
 from detection.detector import ObjectDetector, create_detector
 from detection.face_recognizer import FaceRecognizer
 from detection.overlay import draw_boxes, draw_info_bar, format_camera_time_str
-from notifications.dispatcher import dispatch_notification
+from notifications.dispatcher import dispatch_notification, dispatch_camera_health_notification
 from config.settings import get_settings
 from storage.manager import get_active_images_dir, get_active_clips_dir
 from detection.clip_writer import ClipBuffer, EventClipWriter, CLIP_PUSH_INTERVAL
@@ -29,6 +29,8 @@ EVENT_GAP = 30           # seconds of silence before an event is considered clos
 CLEAR_DETECTIONS_SECS = 5   # clear overlay N secs after motion stops completely
 STUCK_MOTION_SECS = 120     # auto-reset motion detector after N secs of continuous motion
 PERIODIC_SCAN_SECS = 30     # scan for stationary subjects even when there's no motion
+HEALTH_CHECK_INTERVAL_SECS = 30  # how often to check whether each enabled camera is alive
+HEALTH_DEBOUNCE_SECS = 90        # must be unhealthy this long before alerting (USB hiccups shouldn't page anyone)
 
 # Only one YOLO inference at a time across all cameras.
 # _yolo_in_flight stays set while a worker is running; new calls return immediately
@@ -202,6 +204,10 @@ class DetectionPipeline:
         # Detection zones — off by default; a no-op when no zones are configured either way.
         self._zones_enabled: bool = False
         self._camera_zones: dict = {}      # camera_id -> list of zone dicts
+        # Camera health alerting — off by default.
+        self._health_alerts_enabled: bool = False
+        self._camera_unhealthy_since: dict = {}   # camera_id -> time.time() first seen unhealthy
+        self._camera_alerted_offline: set = set()  # camera_ids currently alerted as offline
 
     def start(self):
         self._running = True
@@ -210,6 +216,7 @@ class DetectionPipeline:
             t.start()
             self._threads.append(t)
         threading.Thread(target=self._clip_closer_loop, daemon=True, name='clip-closer').start()
+        threading.Thread(target=self._health_check_loop, daemon=True, name='health-check').start()
 
     def stop(self):
         self._running = False
@@ -260,6 +267,12 @@ class DetectionPipeline:
 
     def set_zones_enabled(self, enabled: bool):
         self._zones_enabled = enabled
+
+    def set_health_alerts_enabled(self, enabled: bool):
+        self._health_alerts_enabled = enabled
+        if not enabled:
+            self._camera_unhealthy_since.clear()
+            self._camera_alerted_offline.clear()
 
     def set_camera_zones(self, camera_id: int, zones: list):
         """zones: list of {zone_type, categories: set|None, points: [(x,y),...]}.
@@ -345,6 +358,61 @@ class DetectionPipeline:
                     self._close_finished_clips()
                 except Exception:
                     pass
+
+    def _health_check_loop(self):
+        while self._running:
+            time.sleep(HEALTH_CHECK_INTERVAL_SECS)
+            if self._health_alerts_enabled:
+                try:
+                    self._check_camera_health()
+                except Exception:
+                    pass
+
+    def _check_camera_health(self):
+        """Compare cameras the user has enabled (DB) against which of them currently
+        have a live, reading capture thread (pipeline) — a camera that goes fully dead
+        gets pruned from self._cameras by the auto-scan loop, so checking against the
+        DB registry (not just the in-memory list) is what actually catches it disappearing."""
+        now = time.time()
+        db = sqlite3.connect(cfg.db_path)
+        try:
+            rows = db.execute("SELECT camera_id, name FROM cameras WHERE enabled=1 AND deleted=0").fetchall()
+        finally:
+            db.close()
+        live_ids = {c.camera_id for c in list(self._cameras) if c.is_alive()}
+
+        seen_ids = set()
+        for camera_id, name in rows:
+            seen_ids.add(camera_id)
+            cam_name = name or f"Camera {camera_id}"
+            if camera_id in live_ids:
+                self._camera_unhealthy_since.pop(camera_id, None)
+                if camera_id in self._camera_alerted_offline:
+                    self._camera_alerted_offline.discard(camera_id)
+                    self._fire_health_alert(camera_id, cam_name, online=True)
+            else:
+                first_seen = self._camera_unhealthy_since.setdefault(camera_id, now)
+                if (now - first_seen >= HEALTH_DEBOUNCE_SECS
+                        and camera_id not in self._camera_alerted_offline):
+                    self._camera_alerted_offline.add(camera_id)
+                    self._fire_health_alert(camera_id, cam_name, online=False)
+
+        # Camera removed/disabled since the last check — drop its tracking state so a
+        # later re-add starts the debounce fresh instead of alerting immediately.
+        stale = set(self._camera_unhealthy_since) - seen_ids
+        for camera_id in stale:
+            self._camera_unhealthy_since.pop(camera_id, None)
+            self._camera_alerted_offline.discard(camera_id)
+
+    def _fire_health_alert(self, camera_id: int, camera_name: str, online: bool):
+        def _work():
+            try:
+                asyncio.run(dispatch_camera_health_notification(
+                    camera_id, camera_name, online, datetime.now(timezone.utc).isoformat()
+                ))
+            except Exception:
+                pass
+        threading.Thread(target=_work, daemon=True).start()
 
     def _close_finished_clips(self):
         to_close = []

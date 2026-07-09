@@ -76,6 +76,38 @@ def _parse_last_notified(last_str):
         return None
 
 
+async def dispatch_camera_health_notification(camera_id: int, camera_name: str, online: bool, ts: str):
+    """Simpler sibling of dispatch_notification for a synthetic event with no
+    category/label/confidence to match against notification_rules — sends straight
+    to every active contact (respecting only the global ntfy on/off switch), skipping
+    the rule-matching/time-window/frequency-batching machinery built for detections."""
+    db = sqlite3.connect(cfg.db_path)
+    db.row_factory = sqlite3.Row
+
+    tz_row = db.execute("SELECT value FROM app_config WHERE key='timezone'").fetchone()
+    tz_name = tz_row["value"] if tz_row else "UTC"
+    ntfy_enabled_row = db.execute("SELECT value FROM app_config WHERE key='ntfy_enabled'").fetchone()
+    ntfy_enabled = (ntfy_enabled_row["value"] if ntfy_enabled_row else "1") != "0"
+
+    time_str = _format_ts(ts, tz_name)
+    label = "Camera Back Online" if online else "Camera Offline"
+    message = f"Nomad Eye Alert\n{camera_name} is {'back online' if online else 'offline'}\n{time_str}"
+
+    contacts = db.execute("SELECT * FROM contacts WHERE active = 1").fetchall()
+    for contact in contacts:
+        if contact["type"] == "ntfy" and not ntfy_enabled:
+            continue
+        err = None
+        try:
+            await _send_contact(contact, message, label, None)
+            status = "sent"
+        except Exception as exc:
+            status = "failed"
+            err = str(exc)
+        _write_log(camera_id, contact, None, label, message, status, err)
+    db.close()
+
+
 async def dispatch_notification(camera_id: int, detections: list, image_path: str, ts: str, event_id: str = None):
     db = sqlite3.connect(cfg.db_path)
     db.row_factory = sqlite3.Row

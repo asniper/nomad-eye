@@ -255,6 +255,18 @@ export default function Settings() {
               />
             </button>
           </SettingRow>
+          <SettingRow label="Camera health alerts" hint="Off by default. Notifies your contacts (same channels as detections) if a camera stays disconnected for 90+ seconds, and again when it recovers.">
+            <button
+              onClick={() => saveSetting('camera_health_alerts_enabled', (allSettings.camera_health_alerts_enabled ?? '0') === '0' ? '1' : '0')}
+              className="relative w-11 h-6 rounded-full transition-colors shrink-0"
+              style={{ background: (allSettings.camera_health_alerts_enabled ?? '0') !== '0' ? '#FFB800' : '#3A3A3A' }}
+            >
+              <span
+                className="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all"
+                style={{ left: (allSettings.camera_health_alerts_enabled ?? '0') !== '0' ? '1.375rem' : '0.25rem' }}
+              />
+            </button>
+          </SettingRow>
           </div>
         </Card>
         <CamerasCard allSettings={allSettings} saveSetting={saveSetting} saving={saving} saved={saved} />

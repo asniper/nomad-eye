@@ -77,6 +77,18 @@ To scan for a newly-connected camera, use **Detect Cameras** at the top of the C
 
 ---
 
+## Camera Health Alerts
+
+Off by default — turn it on in **Settings → Detection → Camera health alerts**. Presence detection (elsewhere in Settings) tracks whether *your phone* is on the network; this tracks whether *a camera itself* is still working.
+
+If an enabled camera stops producing frames (unplugged, USB failure, driver crash) for 90 seconds or more, Nomad Eye sends a "Camera Offline" notification to every active contact through the same channels used for detections (ntfy, SMS, email) — and a "Camera Back Online" notification once it recovers. The 90-second debounce is intentional: brief USB bandwidth hiccups (see above) are common enough on this hardware that alerting on every one of them would be noise, not signal.
+
+This detects a camera that stops responding entirely — it can't detect a camera that's still technically connected but stuck sending the same frozen frame (a driver-level hang rather than a disconnect). If a stream looks visibly frozen without ever triggering an offline alert, that's this limitation; use **Reload** on that camera manually.
+
+Health alerts bypass the per-contact notification rules (category/time-window/frequency filters) — there's no detection category to match against a going-offline event, so every active contact gets notified regardless of their configured rules. Disabling a camera yourself (the Enabled toggle) does **not** trigger an alert; only an unexpected disconnection does.
+
+---
+
 ## Multiple Cameras
 
 Each camera runs its own capture and detection pipeline. On ARM64 devices with limited CPU, running more than 2–3 cameras with full AI detection enabled will saturate the processor. Options:

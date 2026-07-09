@@ -21,6 +21,7 @@ The full system — backend, frontend, and AI — runs as a single systemd servi
 - Detection events saved as images + optional video clips (5s pre-roll / 10s post-roll by default)
 - SMS notifications via Twilio; email via SMTP
 - Rule-based notification filtering (category, time window, frequency)
+- Camera health alerts — notified if a camera goes offline or recovers, off by default
 - WiFi management from the UI; captive portal hotspot for first-time setup
 - Tailscale remote access with in-app setup
 - USB/SD card external storage management

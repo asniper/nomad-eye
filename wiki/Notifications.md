@@ -144,6 +144,8 @@ Each notification includes:
 
 ntfy notifications also set a **priority** (high for people/faces, default for everything else) and a **click action** that opens the event directly.
 
+**Camera health alerts** (Settings → Detection → Camera health alerts, off by default) are a separate, simpler kind of notification — no detection, no image, no rule matching. They go to every active contact when a camera goes offline for 90+ seconds and again when it recovers. See [Camera Setup → Camera Health Alerts](Camera-Setup#camera-health-alerts).
+
 ---
 
 ## Notification Log
