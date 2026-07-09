@@ -201,7 +201,7 @@ def restart_service(_=Depends(require_admin)):
     def _do_restart():
         time.sleep(1.0)
         subprocess.Popen(
-            ["/usr/bin/sudo", "/opt/nomad-eye/storage-helper.sh", "restart"],
+            ["/usr/bin/sudo", _STORAGE_HELPER, "restart"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -214,7 +214,7 @@ def reboot_system(_=Depends(require_admin)):
     def _do_reboot():
         time.sleep(1.0)
         subprocess.Popen(
-            ["/usr/bin/sudo", "/opt/nomad-eye/storage-helper.sh", "reboot"],
+            ["/usr/bin/sudo", _STORAGE_HELPER, "reboot"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

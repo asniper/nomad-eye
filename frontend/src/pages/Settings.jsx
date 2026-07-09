@@ -2213,7 +2213,7 @@ function SystemStatsCard() {
   }, [autoRefresh, refreshInterval, load])
 
   const relevantDisks = stats?.disks?.filter(d =>
-    d.mountpoint === '/' || d.mountpoint === '/home/arduino' || d.mountpoint?.startsWith('/mnt/')
+    d.mountpoint === '/' || d.mountpoint?.startsWith('/mnt/')
   ) ?? []
 
   return (

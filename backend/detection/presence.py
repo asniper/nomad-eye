@@ -47,7 +47,7 @@ def run_arp_scan():
     """Run arp-scan via storage-helper. Returns list of {ip, mac, vendor, hostname?} or None on error."""
     try:
         result = subprocess.run(
-            ['sudo', _STORAGE_HELPER, 'arp-scan'],
+            ['/usr/bin/sudo', _STORAGE_HELPER, 'arp-scan'],
             capture_output=True, text=True, timeout=30
         )
         if result.returncode != 0:

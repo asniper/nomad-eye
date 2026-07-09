@@ -169,7 +169,7 @@ def _apply_system_timezone(tz: str):
     # Fallback: try with sudo (requires passwordless sudoers entry for timedatectl)
     try:
         subprocess.run(
-            ['sudo', 'timedatectl', 'set-timezone', tz],
+            ['/usr/bin/sudo', '/usr/bin/timedatectl', 'set-timezone', tz],
             capture_output=True, timeout=10
         )
     except Exception:
