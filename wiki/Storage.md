@@ -34,9 +34,15 @@ Off by default — enable it in **Settings → Storage → Continuous Recording*
 | Segment length | 5 minutes per file |
 | Overlay | Same camera name / timestamp / detection-box burn-in as event clips and snapshots |
 
-Browse and play back recordings per camera from the **Continuous** panel on the Cameras page (recordings are listed newest-first, with **Play** and **Delete** per segment). There's no scrubbable 24-hour timeline with event markers yet — segments are one 5-minute file at a time.
+Click **Continuous** on a camera's card (Cameras page) to open that camera's own page, which lands on the Continuous tab: the live feed at the top, a summary of how much footage is retained (segment count, approximate total duration, storage used, oldest recording), and a day timeline below it. The timeline shows one block per 5-minute segment positioned by time of day, with gaps where nothing was recorded; use **Prev**/**Next** to browse other days. Click a block to play that segment.
 
-**This uses meaningfully more storage than event clips alone** — it's recording all the time, not just when something happens. It requires external storage (same as event clips; nothing is ever written to internal storage), and continuous segments are purged oldest-first, ahead of event clips, once the disk-threshold purge below kicks in — so turning this on doesn't put your actual detection history at risk of being purged first.
+Selecting a segment also gives you:
+
+- **Lock** — exempts that segment from the disk-threshold auto-purge below, so it survives even after older footage gets deleted. A locked segment can still be deleted manually — locking only protects against the automatic purge.
+- **Download** — saves that segment's video file locally.
+- **Delete** — removes it immediately (asks for confirmation; extra confirmation if it's locked).
+
+**This uses meaningfully more storage than event clips alone** — it's recording all the time, not just when something happens. It requires external storage (same as event clips; nothing is ever written to internal storage), and unlocked continuous segments are purged oldest-first, ahead of event clips, once the disk-threshold purge below kicks in — so turning this on doesn't put your actual detection history at risk of being purged first.
 
 ---
 

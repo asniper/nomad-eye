@@ -63,7 +63,7 @@ There's no per-event "click the face tag → Not This Person" flow — correctio
 - In mixed mode, face detection runs in parallel with YOLO; a motion-region crop fallback retries every 8 seconds if the full-frame scan finds nothing
 - Face detections are not subject to per-pixel motion filtering — a face is reported regardless of whether the face region itself is moving
 - The confidence threshold controls how strict matches must be; lower values allow more uncertain matches (**Settings → Detection → Confidence thresholds → Faces**)
-- Each camera also has a **Sensitivity** setting (`fast` / `normal` / `thorough`, on the Cameras page) that trades face-detection accuracy for CPU — `thorough` runs more upsample passes and is more likely to catch small/distant faces at the cost of speed
+- Each camera also has a **Sensitivity** setting (`fast` / `normal` / `thorough`, under the **Face** tab on that camera's own page) that trades face-detection accuracy for CPU — `thorough` runs more upsample passes and is more likely to catch small/distant faces at the cost of speed
 - On devices with under 2 GB RAM, running face recognition alongside multiple cameras and YOLOWorld may cause memory pressure; monitor with `htop`
 - The "Unknown" candidate list is capped (oldest entries are pruned once the cap is hit) so it can't grow without bound; named face libraries are capped per person as well
 - For best results with glasses or IR/night vision, add face samples captured in those conditions — the system auto-saves unrecognized faces as "Unknown" which you can rename to build samples for difficult conditions

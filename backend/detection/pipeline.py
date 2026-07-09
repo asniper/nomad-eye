@@ -542,11 +542,15 @@ class DetectionPipeline:
 
     def _store_continuous_segment(self, camera_id: int, path: str, started_at_iso: str):
         import logging
+        try:
+            size_bytes = Path(path).stat().st_size
+        except OSError:
+            size_bytes = None
         db = sqlite3.connect(cfg.db_path, timeout=10)
         try:
             db.execute(
-                "INSERT INTO continuous_segments (camera_id, path, started_at, created_at) VALUES (?,?,?,?)",
-                (camera_id, path, started_at_iso, datetime.now(timezone.utc).isoformat())
+                "INSERT INTO continuous_segments (camera_id, path, started_at, created_at, size_bytes) VALUES (?,?,?,?,?)",
+                (camera_id, path, started_at_iso, datetime.now(timezone.utc).isoformat(), size_bytes)
             )
             db.commit()
         except Exception as e:
@@ -586,16 +590,30 @@ class DetectionPipeline:
                 return
 
             seg_rows = db.execute(
-                "SELECT id, path FROM continuous_segments ORDER BY created_at ASC"
+                "SELECT id, path FROM continuous_segments WHERE locked=0 ORDER BY created_at ASC"
             ).fetchall()
             for seg_id, path in seg_rows:
+                # Conditional on locked=0 again here (not just in the SELECT above) — a
+                # segment can be locked in the window between being read as a candidate
+                # and its turn in this loop, since each iteration does a filesystem
+                # unlink + commit and takes real wall-clock time. Deleting the DB row
+                # before unlinking the file (rather than the reverse, as event_clips
+                # below still does) is required for that check to be atomic — the DB is
+                # the only place the lock state lives, so it has to be the gate. The
+                # accepted tradeoff: a crash between this commit and the unlink below
+                # can leave an orphaned file with no DB row pointing at it, whereas the
+                # old unlink-then-delete order could only ever leave a dangling row
+                # (harmless — missing_ok/404 handling already covers a row with no
+                # file). Rare and bounded — not worth a reconciliation job for it.
+                cur = db.execute("DELETE FROM continuous_segments WHERE id=? AND locked=0", (seg_id,))
+                db.commit()
+                if cur.rowcount == 0:
+                    continue
                 if path:
                     try:
                         Path(path).unlink(missing_ok=True)
                     except Exception:
                         pass
-                db.execute("DELETE FROM continuous_segments WHERE id=?", (seg_id,))
-                db.commit()
                 if not _over():
                     return
 

@@ -77,10 +77,13 @@ export const detections = {
   clipsStorage: () => api.get('/detections/clips/storage'),
   purgeClips: () => api.delete('/detections/clips'),
   continuousStorage: () => api.get('/detections/continuous/storage'),
-  listContinuous: (cameraId, limit = 50, offset = 0) =>
-    api.get('/detections/continuous', { params: { camera_id: cameraId, limit, offset } }),
+  listContinuous: (cameraId, date, tz) =>
+    api.get('/detections/continuous', { params: { camera_id: cameraId, date, tz } }),
+  continuousSummary: (cameraId) =>
+    api.get('/detections/continuous/summary', { params: { camera_id: cameraId } }),
   continuousVideo: (segmentId) => api.get(`/detections/continuous/${segmentId}/video`, { responseType: 'blob' }),
   deleteContinuous: (segmentId) => api.delete(`/detections/continuous/${segmentId}`),
+  lockContinuous: (segmentId, locked) => api.post(`/detections/continuous/${segmentId}/lock`, { locked }),
 }
 
 export const notifications = {

@@ -51,6 +51,8 @@ Cameras retain their settings (name, resolution, detection config) when disabled
 
 ## Camera Settings
 
+Name, Enabled, Overlay, Reload, Reset AI, and night mode are quick controls right on each camera's card on the **Cameras** page. Everything else below — Face detection, Image adjustments, Detection zones, Continuous Recording, and this camera's detection history — lives on that camera's own page: click its name, or one of the **Zones** / **Adjust** / **Face** / **Continuous** / **Recent Detections** links on its card, to get there.
+
 For each camera you can configure:
 
 | Setting | Description |

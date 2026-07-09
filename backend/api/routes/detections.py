@@ -1,6 +1,8 @@
 import os
 import shutil
+from datetime import datetime, time as dtime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -321,34 +323,104 @@ def delete_clip(event_id: str, db: sqlite3.Connection = Depends(get_db), _=Depen
     return {"deleted": event_id}
 
 
-@router.get("/continuous/storage")
-def get_continuous_storage(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
-    rows = db.execute("SELECT path FROM continuous_segments").fetchall()
-    segment_count = len(rows)
-    segment_bytes = 0
-    for r in rows:
+def _backfill_missing_sizes(db: sqlite3.Connection, camera_id: int = None):
+    """size_bytes is populated at insert time for every new segment (see
+    pipeline.py's _store_continuous_segment) — this only covers rows written
+    before that column existed, stat()-ing each one exactly once and caching
+    the result so it's never re-stat()'d again."""
+    query = "SELECT id, path FROM continuous_segments WHERE size_bytes IS NULL"
+    params = ()
+    if camera_id is not None:
+        query += " AND camera_id=?"
+        params = (camera_id,)
+    missing = db.execute(query, params).fetchall()
+    for r in missing:
         if r["path"]:
             try:
-                segment_bytes += Path(r["path"]).stat().st_size
+                size = Path(r["path"]).stat().st_size
+                db.execute("UPDATE continuous_segments SET size_bytes=? WHERE id=?", (size, r["id"]))
             except OSError:
                 pass
-    return {"segment_count": segment_count, "segment_bytes": segment_bytes}
+    if missing:
+        db.commit()
+
+
+@router.get("/continuous/storage")
+def get_continuous_storage(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+    _backfill_missing_sizes(db)
+    agg = db.execute("SELECT COUNT(*), SUM(size_bytes) FROM continuous_segments").fetchone()
+    return {"segment_count": agg[0] or 0, "segment_bytes": agg[1] or 0}
 
 
 @router.get("/continuous")
 def list_continuous_segments(
     camera_id: int = Query(...),
-    limit: int = Query(50, le=200),
-    offset: int = 0,
+    date: str = Query(..., description="Calendar day 'YYYY-MM-DD' in `tz`"),
+    tz: str = Query('UTC'),
     db: sqlite3.Connection = Depends(get_db),
     _=Depends(require_auth),
 ):
+    try:
+        zone = ZoneInfo(tz)
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = timezone.utc
+    try:
+        day = datetime.strptime(date, '%Y-%m-%d').date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be 'YYYY-MM-DD'")
+    start_local = datetime.combine(day, dtime.min, tzinfo=zone)
+    end_local = start_local + timedelta(days=1)
+    # Plain string comparison, not SQLite's datetime() — both bounds and every
+    # `started_at` row are always Python .isoformat() UTC strings with the same
+    # '+00:00' suffix convention, so lexicographic comparison already sorts them
+    # correctly with no parsing needed. datetime() would actually be *less*
+    # reliable here: SQLite only gained support for parsing a numeric timezone
+    # suffix like '+00:00' in 3.42 (2023) — on an older bundled libsqlite3 (still
+    # common on Debian/Raspberry Pi OS at the time of writing) it returns NULL
+    # for both sides, silently making this query return nothing at all.
+    start_iso = start_local.astimezone(timezone.utc).isoformat()
+    end_iso = end_local.astimezone(timezone.utc).isoformat()
     rows = db.execute(
-        "SELECT id, camera_id, started_at, created_at FROM continuous_segments "
-        "WHERE camera_id=? ORDER BY started_at DESC LIMIT ? OFFSET ?",
-        (camera_id, limit, offset)
+        "SELECT id, camera_id, started_at, locked FROM continuous_segments WHERE camera_id=? "
+        "AND started_at >= ? AND started_at < ? "
+        "ORDER BY started_at ASC LIMIT 500",
+        (camera_id, start_iso, end_iso)
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+@router.get("/continuous/summary")
+def continuous_summary(camera_id: int = Query(...), db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+    _backfill_missing_sizes(db, camera_id)
+    agg = db.execute(
+        "SELECT COUNT(*), SUM(size_bytes), MIN(started_at), MAX(started_at) FROM continuous_segments WHERE camera_id=?",
+        (camera_id,)
+    ).fetchone()
+    return {
+        "segment_count": agg[0] or 0,
+        "total_bytes": agg[1] or 0,
+        "oldest_started_at": agg[2],
+        "newest_started_at": agg[3],
+    }
+
+
+class LockBody(BaseModel):
+    locked: bool
+
+
+@router.post("/continuous/{segment_id}/lock")
+def lock_continuous_segment(
+    segment_id: int, body: LockBody,
+    db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator),
+):
+    cur = db.execute(
+        "UPDATE continuous_segments SET locked=? WHERE id=?",
+        (1 if body.locked else 0, segment_id)
+    )
+    db.commit()
+    if cur.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Segment not found")
+    return {"id": segment_id, "locked": body.locked}
 
 
 @router.get("/continuous/{segment_id}/video")

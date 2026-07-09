@@ -10,6 +10,7 @@ import Notifications from './pages/Notifications'
 import Settings from './pages/Settings'
 import Setup from './pages/Setup'
 import EventDetail from './pages/EventDetail'
+import CameraDetail from './pages/CameraDetail'
 import Layout from './components/Layout'
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
                 <Route path="/network" element={<Navigate to="/settings" replace />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/events/:eventId" element={<EventDetail />} />
+                <Route path="/cameras/:cameraId" element={<CameraDetail />} />
                 <Route path="*" element={<Navigate to="/" />} />
               </Routes>
             </Layout>

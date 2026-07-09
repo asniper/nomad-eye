@@ -87,7 +87,7 @@ Adjust in **Settings → Detection → Motion threshold**. Vehicles have an extr
 
 ## Detection Zones
 
-Off by default — turn it on in **Settings → Detection → Detection zones**, then draw zones per camera on the **Cameras** page (**Zones** button on each camera's card).
+Off by default — turn it on in **Settings → Detection → Detection zones**, then draw zones per camera on that camera's own page (click **Zones** on its card from the **Cameras** page).
 
 A zone is a polygon you draw over a snapshot of that camera's view, one of two types:
 
