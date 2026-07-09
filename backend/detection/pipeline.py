@@ -15,6 +15,7 @@ from notifications.dispatcher import dispatch_notification, dispatch_camera_heal
 from config.settings import get_settings
 from storage.manager import get_active_images_dir, get_active_clips_dir
 from detection.clip_writer import ClipBuffer, EventClipWriter, CLIP_PUSH_INTERVAL
+from detection.continuous_recorder import SegmentWriter
 import sqlite3
 import shutil as _shutil
 
@@ -208,6 +209,9 @@ class DetectionPipeline:
         self._health_alerts_enabled: bool = False
         self._camera_unhealthy_since: dict = {}   # camera_id -> time.time() first seen unhealthy
         self._camera_alerted_offline: set = set()  # camera_ids currently alerted as offline
+        # Continuous recording — off by default. Requires external storage, same as event clips.
+        self._continuous_enabled: bool = False
+        self._continuous_writers: dict = {}  # camera_id -> SegmentWriter
 
     def start(self):
         self._running = True
@@ -274,6 +278,17 @@ class DetectionPipeline:
             self._camera_unhealthy_since.clear()
             self._camera_alerted_offline.clear()
 
+    def set_continuous_enabled(self, enabled: bool):
+        was_enabled = self._continuous_enabled
+        self._continuous_enabled = enabled
+        if was_enabled and not enabled:
+            # Finalize (don't discard) whatever's recorded so far — unlike event clips,
+            # continuous footage has no separate detection record backing it up.
+            writers = dict(self._continuous_writers)
+            self._continuous_writers.clear()
+            for camera_id, writer in writers.items():
+                self._finalize_continuous_segment(camera_id, writer)
+
     def set_camera_zones(self, camera_id: int, zones: list):
         """zones: list of {zone_type, categories: set|None, points: [(x,y),...]}.
         Called after any zone CRUD so the hot path never hits the DB per detection."""
@@ -334,6 +349,9 @@ class DetectionPipeline:
                 w.close()
             except Exception:
                 pass
+        continuous_writer = self._continuous_writers.pop(camera_id, None)
+        if continuous_writer is not None:
+            self._finalize_continuous_segment(camera_id, continuous_writer)
 
     def _get_clip_overlay_meta(self, camera_id: int, now: float) -> tuple:
         """Cache (camera_name, tz_name) for clip overlay text; refreshed every 30s so a
@@ -478,8 +496,68 @@ class DetectionPipeline:
         finally:
             db.close()
 
+    def _push_continuous_frame(self, camera_id: int, annotated_frame):
+        writer = self._continuous_writers.get(camera_id)
+        if writer is None:
+            clips_dir = get_active_clips_dir()
+            if not clips_dir:
+                return  # continuous recording requires external storage, same as event clips
+            writer = self._start_continuous_segment(camera_id, clips_dir)
+            if writer is None:
+                return
+        writer.write_frame(annotated_frame)
+        if writer.should_rotate():
+            self._rotate_continuous_segment(camera_id)
+
+    def _start_continuous_segment(self, camera_id: int, clips_dir: str):
+        try:
+            seg_dir = Path(clips_dir) / 'continuous' / f'cam{camera_id}'
+            ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+            seg_path = str(seg_dir / f'{ts}.mp4')
+            writer = SegmentWriter(seg_path, camera_id=camera_id)
+            self._continuous_writers[camera_id] = writer
+            return writer
+        except Exception:
+            return None
+
+    def _rotate_continuous_segment(self, camera_id: int):
+        writer = self._continuous_writers.pop(camera_id, None)
+        if writer is None:
+            return
+        self._finalize_continuous_segment(camera_id, writer)
+        # Next frame for this camera lazily opens a fresh segment via _push_continuous_frame.
+
+    def _finalize_continuous_segment(self, camera_id: int, writer):
+        started_at_iso = datetime.fromtimestamp(writer.started_at, tz=timezone.utc).isoformat()
+        def _close_and_store():
+            path = writer.close()
+            if path:
+                path = self._convert_to_h264(path) or path
+                self._store_continuous_segment(camera_id, path, started_at_iso)
+                try:
+                    self._auto_purge_clips()
+                except Exception:
+                    pass
+        threading.Thread(target=_close_and_store, daemon=True).start()
+
+    def _store_continuous_segment(self, camera_id: int, path: str, started_at_iso: str):
+        import logging
+        db = sqlite3.connect(cfg.db_path, timeout=10)
+        try:
+            db.execute(
+                "INSERT INTO continuous_segments (camera_id, path, started_at, created_at) VALUES (?,?,?,?)",
+                (camera_id, path, started_at_iso, datetime.now(timezone.utc).isoformat())
+            )
+            db.commit()
+        except Exception as e:
+            logging.getLogger(__name__).error("Failed to store continuous segment for camera %s: %s", camera_id, e)
+        finally:
+            db.close()
+
     def _auto_purge_clips(self):
-        """Delete oldest clips when storage threshold is exceeded."""
+        """Delete oldest recordings when storage threshold is exceeded. Continuous
+        segments go first — bulk, lower-value ambient footage — before falling back to
+        event clips, which are each tied to an actual detection/notification."""
         db = sqlite3.connect(cfg.db_path)
         try:
             mode_row = db.execute("SELECT value FROM app_config WHERE key='clips_purge_mode'").fetchone()
@@ -500,11 +578,27 @@ class DetectionPipeline:
                         return False
                 else:
                     rows = db.execute("SELECT clip_path FROM event_clips").fetchall()
+                    rows += db.execute("SELECT path FROM continuous_segments").fetchall()
                     total = sum(Path(r[0]).stat().st_size for r in rows if r[0] and Path(r[0]).exists())
                     return total > threshold * 1024 * 1024
 
             if not _over():
                 return
+
+            seg_rows = db.execute(
+                "SELECT id, path FROM continuous_segments ORDER BY created_at ASC"
+            ).fetchall()
+            for seg_id, path in seg_rows:
+                if path:
+                    try:
+                        Path(path).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                db.execute("DELETE FROM continuous_segments WHERE id=?", (seg_id,))
+                db.commit()
+                if not _over():
+                    return
+
             rows = db.execute(
                 "SELECT event_id, clip_path FROM event_clips ORDER BY created_at ASC"
             ).fetchall()
@@ -743,12 +837,12 @@ class DetectionPipeline:
                 has_motion, motion_mask = False, None
             now = time.time()
 
-            # --- CLIP RING BUFFER & LIVE EXTENSION ---
-            if self._clips_enabled:
+            # --- CLIP RING BUFFER & LIVE EXTENSION + CONTINUOUS RECORDING ---
+            # Both features push at the same cadence and share one annotated frame —
+            # independently toggleable, but the overlay burn-in only needs computing once.
+            if self._clips_enabled or self._continuous_enabled:
                 last_push = self._last_clip_push.get(cam.camera_id, 0)
                 if now - last_push >= CLIP_PUSH_INTERVAL:
-                    if cam.camera_id not in self._clip_buffers:
-                        self._clip_buffers[cam.camera_id] = ClipBuffer(self._clip_pre_roll)
                     # Burn in the same camera/time/detection overlay as the event snapshots,
                     # on a copy — the raw `frame` is still needed below for motion/YOLO.
                     cam_name, tz_name = self._get_clip_overlay_meta(cam.camera_id, now)
@@ -759,12 +853,19 @@ class DetectionPipeline:
                     left_str = format_camera_time_str(
                         cam_name, datetime.now(timezone.utc).isoformat(), tz_name)
                     draw_info_bar(annotated, left_str, dets)
-                    self._clip_buffers[cam.camera_id].push(annotated)
                     self._last_clip_push[cam.camera_id] = now
-                    with self._clip_lock:
-                        cam_writers = dict(self._clip_writers.get(cam.camera_id, {}))
-                    for w in cam_writers.values():
-                        w.write_frame(annotated)
+
+                    if self._clips_enabled:
+                        if cam.camera_id not in self._clip_buffers:
+                            self._clip_buffers[cam.camera_id] = ClipBuffer(self._clip_pre_roll)
+                        self._clip_buffers[cam.camera_id].push(annotated)
+                        with self._clip_lock:
+                            cam_writers = dict(self._clip_writers.get(cam.camera_id, {}))
+                        for w in cam_writers.values():
+                            w.write_frame(annotated)
+
+                    if self._continuous_enabled:
+                        self._push_continuous_frame(cam.camera_id, annotated)
             # ---
 
             if has_motion:

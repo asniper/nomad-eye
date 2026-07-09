@@ -73,8 +73,9 @@ sqlite3 /opt/nomad-eye/data/db/nomadeye.db "SELECT key, value FROM app_config;"
 | `presence_away_status` | Status to set when no watched device is detected (default `away`) |
 | `zones_enabled` | `1` / `0` — global on/off for detection zones (default `0`); zone shapes themselves live in `camera_zones`, not here |
 | `camera_health_alerts_enabled` | `1` / `0` — global on/off for camera-offline/back-online notifications (default `0`) |
+| `continuous_recording_enabled` | `1` / `0` — global on/off for always-on recording (default `0`); segments themselves live in `continuous_segments`, not here |
 
-User accounts and login sessions are **not** in `app_config` — they live in their own `users` and `sessions` tables in the same database. See [Users](Users). Detection zones live in their own `camera_zones` table (one row per polygon, normalized 0-1 points as JSON) — see [AI Detection → Detection Zones](AI-Detection#detection-zones).
+User accounts and login sessions are **not** in `app_config` — they live in their own `users` and `sessions` tables in the same database. See [Users](Users). Detection zones live in their own `camera_zones` table (one row per polygon, normalized 0-1 points as JSON) — see [AI Detection → Detection Zones](AI-Detection#detection-zones). Continuous recording segments live in `continuous_segments` (one row per 5-minute file) — see [Storage → Continuous Recording](Storage#continuous-recording).
 
 ---
 

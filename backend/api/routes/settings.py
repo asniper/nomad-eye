@@ -126,6 +126,8 @@ async def set_setting(body: ConfigItem, db: sqlite3.Connection = Depends(get_db)
         _pipeline.set_zones_enabled(body.value != '0')
     elif body.key == 'camera_health_alerts_enabled' and _pipeline is not None:
         _pipeline.set_health_alerts_enabled(body.value != '0')
+    elif body.key == 'continuous_recording_enabled' and _pipeline is not None:
+        _pipeline.set_continuous_enabled(body.value != '0')
     elif body.key in ('video_width', 'video_height', 'video_fps') and _pipeline is not None:
         s = db.execute("SELECT key, value FROM app_config WHERE key IN ('video_width','video_height','video_fps')").fetchall()
         kv = {r['key']: r['value'] for r in s}

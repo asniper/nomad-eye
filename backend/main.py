@@ -86,6 +86,7 @@ async def lifespan(app: FastAPI):
     zones_enabled_row = db.execute("SELECT value FROM app_config WHERE key='zones_enabled'").fetchone()
     zone_rows = db.execute("SELECT camera_id, zone_type, categories, points FROM camera_zones").fetchall()
     health_alerts_row = db.execute("SELECT value FROM app_config WHERE key='camera_health_alerts_enabled'").fetchone()
+    continuous_row = db.execute("SELECT value FROM app_config WHERE key='continuous_recording_enabled'").fetchone()
     db.close()
 
     from api.routes.settings import _parse_classes
@@ -149,6 +150,7 @@ async def lifespan(app: FastAPI):
     for cid, zones in zones_by_camera.items():
         pipeline.set_camera_zones(cid, zones)
     pipeline.set_health_alerts_enabled((health_alerts_row[0] if health_alerts_row else '0') != '0')
+    pipeline.set_continuous_enabled((continuous_row[0] if continuous_row else '0') != '0')
     cam_router.set_pipeline(pipeline)
     settings.set_pipeline(pipeline)
     faces_router.set_pipeline(pipeline)

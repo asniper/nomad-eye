@@ -23,6 +23,23 @@ You can watch clips inline and download them from the **Event Detail** page. Cli
 
 ---
 
+## Continuous Recording
+
+Off by default — enable it in **Settings → Storage → Continuous Recording**. Unlike event clips, this records constantly, not just around detected events — it's for reviewing what happened in the gaps between events.
+
+| Property | Value |
+|---|---|
+| Format | H.264 MP4, same encoding pipeline as event clips |
+| Resolution | 640×360 @ 5 fps (ambient footage, not forensic-quality) |
+| Segment length | 5 minutes per file |
+| Overlay | Same camera name / timestamp / detection-box burn-in as event clips and snapshots |
+
+Browse and play back recordings per camera from the **Continuous** panel on the Cameras page (recordings are listed newest-first, with **Play** and **Delete** per segment). There's no scrubbable 24-hour timeline with event markers yet — segments are one 5-minute file at a time.
+
+**This uses meaningfully more storage than event clips alone** — it's recording all the time, not just when something happens. It requires external storage (same as event clips; nothing is ever written to internal storage), and continuous segments are purged oldest-first, ahead of event clips, once the disk-threshold purge below kicks in — so turning this on doesn't put your actual detection history at risk of being purged first.
+
+---
+
 ## Internal vs External Storage
 
 By default, Nomad Eye stores files in `/opt/nomad-eye/data/`. On most devices this is on the internal eMMC or SD card.
@@ -99,7 +116,7 @@ The **Purge Detections** section on the same **Storage** card lets you delete de
 
 This deletes every matching record (and its images/clips) — there's no age or date filter, so it purges everything in the selected category, not just old events. Purge is permanent; consider copying clips to another device first if you need to keep them.
 
-**Disk threshold auto-purge:** When the clips storage device exceeds 90% capacity, Nomad Eye automatically deletes the oldest clips until usage falls below the threshold. This prevents the disk from filling up entirely during continuous detection. The threshold is configurable via the `clips_purge_threshold` database key (default `90`). This is the only *age-based* (oldest-first) purge behavior in the app.
+**Disk threshold auto-purge:** When the clips storage device exceeds 90% capacity, Nomad Eye automatically deletes the oldest recordings until usage falls below the threshold. Continuous recording segments are purged first (bulk, lower-value ambient footage), and only once none are left does it fall back to purging event clips (each tied to an actual detection). This prevents the disk from filling up entirely during continuous operation. The threshold is configurable via the `clips_purge_threshold` database key (default `90`). This is the only *age-based* (oldest-first) purge behavior in the app.
 
 ---
 

@@ -273,6 +273,104 @@ function ZoneEditor({ camId }) {
   )
 }
 
+function ContinuousPanel({ camId }) {
+  const PAGE_SIZE = 20
+  const [segments, setSegments] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+  const [error, setError] = useState('')
+  const [playingId, setPlayingId] = useState(null)
+  const [videoUrl, setVideoUrl] = useState(null)
+  const videoUrlRef = useRef(null)
+
+  const load = useCallback((offset, append) => {
+    const setLoadingFn = append ? setLoadingMore : setLoading
+    setLoadingFn(true)
+    detectionsApi.listContinuous(camId, PAGE_SIZE, offset)
+      .then(r => {
+        setSegments(prev => append ? [...prev, ...r.data] : r.data)
+        setHasMore(r.data.length === PAGE_SIZE)
+        setError('')
+      })
+      .catch(() => setError('Failed to load recordings.'))
+      .finally(() => setLoadingFn(false))
+  }, [camId])
+
+  useEffect(() => {
+    load(0, false)
+    return () => { if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current) }
+  }, [load])
+
+  const play = async (segmentId) => {
+    if (playingId === segmentId) { setPlayingId(null); return }
+    try {
+      const r = await detectionsApi.continuousVideo(segmentId)
+      const url = URL.createObjectURL(r.data)
+      if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current)
+      videoUrlRef.current = url
+      setVideoUrl(url)
+      setPlayingId(segmentId)
+    } catch {
+      setError('Failed to load video.')
+    }
+  }
+
+  const remove = async (segmentId) => {
+    try {
+      await detectionsApi.deleteContinuous(segmentId)
+      setSegments(prev => prev.filter(s => s.id !== segmentId))
+      if (playingId === segmentId) setPlayingId(null)
+    } catch {}
+  }
+
+  if (loading) {
+    return (
+      <div className="rounded-lg bg-[#1A1A1A] border border-[#3A3A3A] px-3 py-3 text-xs text-gray-600">
+        Loading recordings...
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg bg-[#1A1A1A] border border-[#3A3A3A] px-4 py-3 space-y-3">
+      <span className="text-xs text-gray-500 uppercase tracking-wider">Continuous Recordings</span>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      {segments.length === 0 ? (
+        <p className="text-xs text-gray-600">No recordings yet. Enable continuous recording in Settings → Storage if you want them.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {segments.map(seg => (
+            <div key={seg.id}>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-300">{formatDateTime(seg.started_at)}</span>
+                <div className="flex items-center gap-3">
+                  <button onClick={() => play(seg.id)} className="text-gray-400 hover:text-white">
+                    {playingId === seg.id ? 'Hide' : 'Play'}
+                  </button>
+                  <button onClick={() => remove(seg.id)} className="text-gray-500 hover:text-red-400">Delete</button>
+                </div>
+              </div>
+              {playingId === seg.id && videoUrl && (
+                <video src={videoUrl} controls autoPlay className="w-full mt-1.5 rounded" style={{ maxWidth: '480px' }} />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {hasMore && segments.length > 0 && (
+        <button
+          onClick={() => load(segments.length, true)}
+          disabled={loadingMore}
+          className="text-xs text-gray-500 hover:text-gray-300 disabled:opacity-50"
+        >
+          {loadingMore ? 'Loading…' : 'Load more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 function AdjustPanel({ camId }) {
   const [loading, setLoading] = useState(true)
   const [hwControls, setHwControls] = useState({})
@@ -625,6 +723,7 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
   const [showAdjust, setShowAdjust] = useState(false)
   const [showFace, setShowFace] = useState(false)
   const [showZones, setShowZones] = useState(false)
+  const [showContinuous, setShowContinuous] = useState(false)
   const [nightMode, setNightMode] = useState(cam.night_mode || 'off')
   const [nightModeHw, setNightModeHw] = useState(cam.night_mode_hw || false)
   const [debugMode, setDebugMode] = useState(false)
@@ -867,6 +966,14 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
           >
             Zones
           </button>
+          <button
+            onClick={() => setShowContinuous(p => !p)}
+            className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+            style={showContinuous ? { background: '#4c6e5d', color: '#ffffff' } : { background: '#3A3A3A', color: '#9CA3AF' }}
+            title="Browse continuous recordings for this camera"
+          >
+            Continuous
+          </button>
           <div className="flex items-center gap-1">
             {nightModeHw ? (
               <div className="flex rounded overflow-hidden border border-[#484848]"
@@ -959,6 +1066,10 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
 
       {showZones && (
         <ZoneEditor camId={cam.id} />
+      )}
+
+      {showContinuous && (
+        <ContinuousPanel camId={cam.id} />
       )}
 
       {showFace && (

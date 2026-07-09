@@ -13,6 +13,7 @@ Self-hosted AI security camera system — runs entirely on-device, no cloud requ
 - **Face recognition** — identify known faces and build a local face library from captures
 - **Live MJPEG streams** — real-time video with motion and detection overlay
 - **Detection events** — saves image snapshots and H.264 video clips (pre-roll + post-roll) locally; watch clips inline or download from the event detail page
+- **Continuous recording** — optional always-on recording per camera, off by default, requires external storage
 - **Notifications** — push via ntfy (free, no account needed), SMS via Twilio or carrier email gateway, email via SMTP; rule-based by category, time window, and frequency
 - **Camera health alerts** — notified if a camera goes offline or comes back, off by default
 - **Presence detection** — automatically switch device status based on whether your phone is on the local network (ARP-based, no app required)

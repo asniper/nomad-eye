@@ -1626,7 +1626,72 @@ function StorageTab() {
       <ExternalDevicesCard onDeviceChanged={triggerRefresh} />
       <StorageCard />
       <VideoClipsCard refreshKey={refreshKey} />
+      <ContinuousRecordingCard refreshKey={refreshKey} />
     </div>
+  )
+}
+
+function ContinuousRecordingCard({ refreshKey = 0 }) {
+  const [s, setS] = useState(null)
+  const [storage, setStorage] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  const load = useCallback(() => {
+    settings.getAll().then(r => setS(r.data)).catch(() => {})
+    detectionsApi.continuousStorage().then(r => setStorage(r.data)).catch(() => {})
+  }, [])
+
+  useEffect(() => { load() }, [load, refreshKey])
+
+  if (!s) return null
+  const enabled = s.continuous_recording_enabled === '1'
+
+  const toggle = async () => {
+    setSaving(true)
+    try {
+      await settings.set('continuous_recording_enabled', enabled ? '0' : '1')
+      setS(p => ({ ...p, continuous_recording_enabled: enabled ? '0' : '1' }))
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch {}
+    setSaving(false)
+  }
+
+  return (
+    <Card title="Continuous Recording">
+      <p className="text-xs text-gray-500 mb-4">
+        Always-on recording per camera (640×360, 5 fps, 5-minute segments) — not just around detected events. Same camera/time/detection overlay as clips. Requires external storage. Browse and play back recordings from each camera's <strong>Continuous</strong> panel on the Cameras page.
+      </p>
+      <p className="text-xs text-yellow-500 mb-4">
+        This runs constantly rather than only around events — expect meaningfully more disk usage than event clips alone. Segments are purged oldest-first ahead of event clips once storage crosses the threshold set below.
+      </p>
+
+      <div className="flex items-center justify-between py-3 border-b border-[#3A3A3A]">
+        <div>
+          <p className="text-sm font-medium text-white">Enable continuous recording</p>
+          <p className="text-xs text-gray-500 mt-0.5">Off by default</p>
+        </div>
+        <button
+          onClick={toggle}
+          disabled={saving}
+          className="relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-50"
+          style={{ background: enabled ? '#FFB800' : '#3A3A3A' }}
+        >
+          <span
+            className="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all"
+            style={{ left: enabled ? '1.375rem' : '0.25rem' }}
+          />
+        </button>
+      </div>
+      {saved && <p className="text-xs text-green-400 pt-2">Saved ✓</p>}
+
+      {storage && (
+        <p className="text-xs text-gray-500 pt-3">
+          {storage.segment_count} segment{storage.segment_count === 1 ? '' : 's'} stored, {fmtBytes(storage.segment_bytes)} total.
+        </p>
+      )}
+    </Card>
   )
 }
 

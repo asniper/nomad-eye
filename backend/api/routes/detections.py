@@ -321,6 +321,62 @@ def delete_clip(event_id: str, db: sqlite3.Connection = Depends(get_db), _=Depen
     return {"deleted": event_id}
 
 
+@router.get("/continuous/storage")
+def get_continuous_storage(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+    rows = db.execute("SELECT path FROM continuous_segments").fetchall()
+    segment_count = len(rows)
+    segment_bytes = 0
+    for r in rows:
+        if r["path"]:
+            try:
+                segment_bytes += Path(r["path"]).stat().st_size
+            except OSError:
+                pass
+    return {"segment_count": segment_count, "segment_bytes": segment_bytes}
+
+
+@router.get("/continuous")
+def list_continuous_segments(
+    camera_id: int = Query(...),
+    limit: int = Query(50, le=200),
+    offset: int = 0,
+    db: sqlite3.Connection = Depends(get_db),
+    _=Depends(require_auth),
+):
+    rows = db.execute(
+        "SELECT id, camera_id, started_at, created_at FROM continuous_segments "
+        "WHERE camera_id=? ORDER BY started_at DESC LIMIT ? OFFSET ?",
+        (camera_id, limit, offset)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.get("/continuous/{segment_id}/video")
+def get_continuous_video(segment_id: int, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+    row = db.execute("SELECT path FROM continuous_segments WHERE id=?", (segment_id,)).fetchone()
+    if not row or not row["path"]:
+        raise HTTPException(status_code=404, detail="Segment not found")
+    p = Path(row["path"])
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="Segment file not found on disk")
+    return FileResponse(str(p), media_type="video/mp4", filename=f"segment-{segment_id}.mp4")
+
+
+@router.delete("/continuous/{segment_id}")
+def delete_continuous_segment(segment_id: int, db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
+    row = db.execute("SELECT path FROM continuous_segments WHERE id=?", (segment_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Segment not found")
+    db.execute("DELETE FROM continuous_segments WHERE id=?", (segment_id,))
+    db.commit()
+    if row["path"]:
+        try:
+            os.remove(row["path"])
+        except OSError:
+            pass
+    return {"deleted": segment_id}
+
+
 @router.get("/{detection_id}/image")
 def get_image(detection_id: int, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
     row = db.execute("SELECT image_path FROM detections WHERE id = ?", (detection_id,)).fetchone()

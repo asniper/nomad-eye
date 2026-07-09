@@ -19,6 +19,7 @@ The full system — backend, frontend, and AI — runs as a single systemd servi
 - Face recognition with a local face library
 - Live MJPEG streams with motion and detection overlay
 - Detection events saved as images + optional video clips (5s pre-roll / 10s post-roll by default)
+- Continuous (always-on) recording per camera, off by default — requires external storage
 - SMS notifications via Twilio; email via SMTP
 - Rule-based notification filtering (category, time window, frequency)
 - Camera health alerts — notified if a camera goes offline or recovers, off by default

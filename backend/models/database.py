@@ -97,6 +97,14 @@ def init_db():
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS continuous_segments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            camera_id INTEGER NOT NULL,
+            path TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS presence_devices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -165,6 +173,20 @@ def init_db():
         pass
     try:
         db.execute("CREATE INDEX IF NOT EXISTS idx_camera_zones_camera ON camera_zones (camera_id)")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("CREATE INDEX IF NOT EXISTS idx_continuous_segments_camera_created "
+                    "ON continuous_segments (camera_id, created_at)")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass
+    try:
+        # created_at (above) serves the purge loop's oldest-first deletion; started_at
+        # is a genuinely different sort key for the newest-first segment browser.
+        db.execute("CREATE INDEX IF NOT EXISTS idx_continuous_segments_camera_started "
+                    "ON continuous_segments (camera_id, started_at)")
         db.commit()
     except sqlite3.OperationalError:
         pass
