@@ -74,6 +74,205 @@ const HW_LABELS = {
   focus_absolute: 'Focus',
 }
 
+const ZONE_FILL = { include: 'rgba(74,222,128,0.35)', exclude: 'rgba(239,68,68,0.35)' }
+const ZONE_STROKE = { include: '#4ADE80', exclude: '#F87171' }
+
+function ZoneEditor({ camId }) {
+  const [imgUrl, setImgUrl] = useState(null)
+  const [zones, setZones] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [drafting, setDrafting] = useState(false)
+  const [draftPoints, setDraftPoints] = useState([])
+  const [draftType, setDraftType] = useState('exclude')
+  const [draftCategories, setDraftCategories] = useState(() => new Set())
+  const [draftName, setDraftName] = useState('')
+  const [error, setError] = useState('')
+  const svgRef = useRef(null)
+  const imgUrlRef = useRef(null)
+
+  const load = useCallback(() => {
+    setError('')
+    Promise.all([
+      cameras.snapshot(camId).then(r => r.data),
+      cameras.listZones(camId).then(r => r.data),
+    ]).then(([blob, zoneList]) => {
+      // Only create the object URL once both requests have actually succeeded —
+      // otherwise a snapshot success + zones failure leaks the URL forever (nothing
+      // downstream would ever get a chance to revoke it).
+      const url = URL.createObjectURL(blob)
+      if (imgUrlRef.current) URL.revokeObjectURL(imgUrlRef.current)
+      imgUrlRef.current = url
+      setImgUrl(url)
+      setZones(zoneList)
+    }).catch(() => setError('Failed to load camera snapshot — is the camera live?'))
+      .finally(() => setLoading(false))
+  }, [camId])
+
+  useEffect(() => {
+    load()
+    return () => { if (imgUrlRef.current) URL.revokeObjectURL(imgUrlRef.current) }
+  }, [load])
+
+  const handleSvgClick = (e) => {
+    if (!drafting) return
+    const rect = svgRef.current.getBoundingClientRect()
+    const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+    const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height))
+    setDraftPoints(p => [...p, [x, y]])
+  }
+
+  const startDraft = () => {
+    setDrafting(true); setDraftPoints([]); setDraftName('')
+    setDraftType('exclude'); setDraftCategories(new Set()); setError('')
+  }
+
+  const cancelDraft = () => { setDrafting(false); setDraftPoints([]) }
+
+  const toggleCategory = (cat) => {
+    setDraftCategories(prev => {
+      const next = new Set(prev)
+      if (next.has(cat)) next.delete(cat); else next.add(cat)
+      return next
+    })
+  }
+
+  const saveDraft = async () => {
+    if (draftPoints.length < 3) { setError('Draw at least 3 points before saving.'); return }
+    try {
+      await cameras.createZone(camId, {
+        name: draftName,
+        zone_type: draftType,
+        categories: draftCategories.size > 0 ? [...draftCategories] : null,
+        points: draftPoints,
+      })
+      cancelDraft()
+      load()
+    } catch (e) {
+      setError(e?.response?.data?.detail || 'Failed to save zone.')
+    }
+  }
+
+  const removeZone = async (zoneId) => {
+    try {
+      await cameras.deleteZone(camId, zoneId)
+      load()
+    } catch {}
+  }
+
+  if (loading) {
+    return (
+      <div className="rounded-lg bg-[#1A1A1A] border border-[#3A3A3A] px-3 py-3 text-xs text-gray-600">
+        Loading zones...
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg bg-[#1A1A1A] border border-[#3A3A3A] px-4 py-3 space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <span className="text-xs text-gray-500 uppercase tracking-wider">Detection Zones</span>
+        {!drafting ? (
+          <button onClick={startDraft} disabled={!imgUrl}
+            className="px-3 py-1 rounded text-xs font-medium disabled:opacity-40"
+            style={{ background: '#FFB800', color: '#151925' }}>
+            Draw New Zone
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">{draftPoints.length} point{draftPoints.length === 1 ? '' : 's'} (need 3+)</span>
+            <button onClick={cancelDraft} className="text-xs text-gray-500 hover:text-gray-300">Cancel</button>
+            <button onClick={saveDraft} disabled={draftPoints.length < 3}
+              className="px-3 py-1 rounded text-xs font-medium disabled:opacity-40"
+              style={{ background: ZONE_STROKE.include, color: '#001a00' }}>
+              Save Zone
+            </button>
+          </div>
+        )}
+      </div>
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
+
+      {drafting && (
+        <div className="flex items-center gap-3 flex-wrap text-xs">
+          <input
+            value={draftName}
+            onChange={e => setDraftName(e.target.value)}
+            placeholder="Zone name (optional)"
+            className="bg-[#3A3A3A] border border-[#484848] rounded px-2 py-1 text-white focus:outline-none"
+          />
+          <div className="flex rounded overflow-hidden border border-[#484848]">
+            {['exclude', 'include'].map(t => (
+              <button key={t} onClick={() => setDraftType(t)}
+                className="px-2.5 py-1 font-medium capitalize"
+                style={draftType === t ? { background: ZONE_STROKE[t], color: '#111' } : { background: '#2A2A2A', color: '#9CA3AF' }}>
+                {t}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-1 flex-wrap">
+            {OVERLAY_CATEGORIES.map(cat => (
+              <button key={cat} onClick={() => toggleCategory(cat)}
+                className="px-2 py-1 rounded capitalize"
+                style={draftCategories.has(cat) ? CATEGORY_STYLE[cat].on : CATEGORY_STYLE[cat].off}>
+                {cat}
+              </button>
+            ))}
+          </div>
+          <span className="text-gray-600">{draftCategories.size === 0 ? '(applies to all categories)' : ''}</span>
+        </div>
+      )}
+
+      <div className="relative rounded overflow-hidden" style={{ maxWidth: '480px' }}>
+        {imgUrl && <img src={imgUrl} alt="" className="w-full block" draggable={false} />}
+        <svg
+          ref={svgRef}
+          viewBox="0 0 1 1"
+          preserveAspectRatio="none"
+          className="absolute inset-0 w-full h-full"
+          style={{ cursor: drafting ? 'crosshair' : 'default' }}
+          onClick={handleSvgClick}
+        >
+          {zones.map(z => (
+            <polygon
+              key={z.id}
+              points={z.points.map(p => p.join(',')).join(' ')}
+              fill={ZONE_FILL[z.zone_type]}
+              stroke={ZONE_STROKE[z.zone_type]}
+              strokeWidth={0.004}
+            />
+          ))}
+          {drafting && draftPoints.length > 0 && (
+            <polyline
+              points={draftPoints.map(p => p.join(',')).join(' ')}
+              fill="none"
+              stroke={ZONE_STROKE[draftType]}
+              strokeWidth={0.004}
+            />
+          )}
+          {drafting && draftPoints.map(([x, y], i) => (
+            <circle key={i} cx={x} cy={y} r={0.008} fill={ZONE_STROKE[draftType]} />
+          ))}
+        </svg>
+      </div>
+
+      {zones.length > 0 ? (
+        <div className="space-y-1">
+          {zones.map(z => (
+            <div key={z.id} className="flex items-center justify-between text-xs">
+              <span style={{ color: ZONE_STROKE[z.zone_type] }}>
+                {z.zone_type === 'exclude' ? 'Ignore' : 'Only'}{z.name ? ` "${z.name}"` : ''} — {z.categories ? z.categories.join(', ') : 'all categories'}
+              </span>
+              <button onClick={() => removeZone(z.id)} className="text-gray-500 hover:text-red-400">Delete</button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        !drafting && <p className="text-xs text-gray-600">No zones yet — the whole frame is detected normally.</p>
+      )}
+    </div>
+  )
+}
+
 function AdjustPanel({ camId }) {
   const [loading, setLoading] = useState(true)
   const [hwControls, setHwControls] = useState({})
@@ -425,6 +624,7 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
   const [showDetections, setShowDetections] = useState(false)
   const [showAdjust, setShowAdjust] = useState(false)
   const [showFace, setShowFace] = useState(false)
+  const [showZones, setShowZones] = useState(false)
   const [nightMode, setNightMode] = useState(cam.night_mode || 'off')
   const [nightModeHw, setNightModeHw] = useState(cam.night_mode_hw || false)
   const [debugMode, setDebugMode] = useState(false)
@@ -659,6 +859,14 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
           >
             Adjust
           </button>
+          <button
+            onClick={() => setShowZones(p => !p)}
+            className="px-2.5 py-1 rounded text-xs font-medium transition-colors"
+            style={showZones ? { background: '#4c6e5d', color: '#ffffff' } : { background: '#3A3A3A', color: '#9CA3AF' }}
+            title="Detection zones — ignore or restrict regions of the frame"
+          >
+            Zones
+          </button>
           <div className="flex items-center gap-1">
             {nightModeHw ? (
               <div className="flex rounded overflow-hidden border border-[#484848]"
@@ -747,6 +955,10 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
 
       {showAdjust && (
         <AdjustPanel camId={cam.id} />
+      )}
+
+      {showZones && (
+        <ZoneEditor camId={cam.id} />
       )}
 
       {showFace && (

@@ -136,6 +136,16 @@ def init_db():
             expires_at TEXT NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
+
+        CREATE TABLE IF NOT EXISTS camera_zones (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            camera_id INTEGER NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            zone_type TEXT NOT NULL CHECK(zone_type IN ('include', 'exclude')),
+            categories TEXT,
+            points TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
     """)
     db.commit()
     try:
@@ -150,6 +160,11 @@ def init_db():
         pass
     try:
         db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions (expires_at)")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("CREATE INDEX IF NOT EXISTS idx_camera_zones_camera ON camera_zones (camera_id)")
         db.commit()
     except sqlite3.OperationalError:
         pass
@@ -230,6 +245,9 @@ def init_db():
         ('presence_away_status',     'away'),
         ('notification_link_mode',   'local_ip'),
         ('notification_hostname',    ''),
+        ('zones_enabled',            '0'),
+        ('camera_health_alerts_enabled', '0'),
+        ('continuous_recording_enabled', '0'),
     ]
     for key, value in defaults:
         db.execute(

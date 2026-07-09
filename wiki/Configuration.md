@@ -71,8 +71,9 @@ sqlite3 /opt/nomad-eye/data/db/nomadeye.db "SELECT key, value FROM app_config;"
 | `presence_timeout` | Minutes without a ping before switching to away status (default `5`) |
 | `presence_home_status` | Status to set when a watched device is detected (default `home`) |
 | `presence_away_status` | Status to set when no watched device is detected (default `away`) |
+| `zones_enabled` | `1` / `0` — global on/off for detection zones (default `0`); zone shapes themselves live in `camera_zones`, not here |
 
-User accounts and login sessions are **not** in `app_config` — they live in their own `users` and `sessions` tables in the same database. See [Users](Users).
+User accounts and login sessions are **not** in `app_config` — they live in their own `users` and `sessions` tables in the same database. See [Users](Users). Detection zones live in their own `camera_zones` table (one row per polygon, normalized 0-1 points as JSON) — see [AI Detection → Detection Zones](AI-Detection#detection-zones).
 
 ---
 

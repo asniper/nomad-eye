@@ -243,6 +243,18 @@ export default function Settings() {
               saved={saved.detection_cooldown}
             />
           </SettingRow>
+          <SettingRow label="Detection zones" hint="Off by default. Draw include/exclude regions per camera (Cameras page) — e.g. ignore a stationary trailer that keeps false-positiving as a moving truck.">
+            <button
+              onClick={() => saveSetting('zones_enabled', (allSettings.zones_enabled ?? '0') === '0' ? '1' : '0')}
+              className="relative w-11 h-6 rounded-full transition-colors shrink-0"
+              style={{ background: (allSettings.zones_enabled ?? '0') !== '0' ? '#FFB800' : '#3A3A3A' }}
+            >
+              <span
+                className="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all"
+                style={{ left: (allSettings.zones_enabled ?? '0') !== '0' ? '1.375rem' : '0.25rem' }}
+              />
+            </button>
+          </SettingRow>
           </div>
         </Card>
         <CamerasCard allSettings={allSettings} saveSetting={saveSetting} saving={saving} saved={saved} />

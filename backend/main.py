@@ -17,6 +17,7 @@ if os.path.exists(_helper_src) and not os.path.lexists(_helper_dst):
         pass
 
 import asyncio
+import json
 import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -82,6 +83,8 @@ async def lifespan(app: FastAPI):
     clips_enabled_row = db.execute("SELECT value FROM app_config WHERE key='clips_enabled'").fetchone()
     clips_pre_roll_row = db.execute("SELECT value FROM app_config WHERE key='clips_pre_roll'").fetchone()
     clips_post_roll_row = db.execute("SELECT value FROM app_config WHERE key='clips_post_roll'").fetchone()
+    zones_enabled_row = db.execute("SELECT value FROM app_config WHERE key='zones_enabled'").fetchone()
+    zone_rows = db.execute("SELECT camera_id, zone_type, categories, points FROM camera_zones").fetchall()
     db.close()
 
     from api.routes.settings import _parse_classes
@@ -134,6 +137,16 @@ async def lifespan(app: FastAPI):
         pre_roll=int(clips_pre_roll_row[0]) if clips_pre_roll_row else 5,
         post_roll=int(clips_post_roll_row[0]) if clips_post_roll_row else 10,
     )
+    pipeline.set_zones_enabled((zones_enabled_row[0] if zones_enabled_row else '0') != '0')
+    zones_by_camera = {}
+    for row in zone_rows:
+        zones_by_camera.setdefault(row[0], []).append({
+            "zone_type": row[1],
+            "categories": set(json.loads(row[2])) if row[2] else None,
+            "points": [tuple(p) for p in json.loads(row[3])],
+        })
+    for cid, zones in zones_by_camera.items():
+        pipeline.set_camera_zones(cid, zones)
     cam_router.set_pipeline(pipeline)
     settings.set_pipeline(pipeline)
     faces_router.set_pipeline(pipeline)

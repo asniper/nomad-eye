@@ -58,6 +58,10 @@ export const cameras = {
   setAdjustments: (id, data) => api.patch(`/cameras/${id}/adjustments`, data),
   setFaceSettings: (id, data) => api.patch(`/cameras/${id}/face-settings`, data),
   setNightMode: (id, mode) => api.patch(`/cameras/${id}/night-mode`, { mode }),
+  snapshot: (id) => api.get(`/cameras/${id}/snapshot`, { responseType: 'blob' }),
+  listZones: (id) => api.get(`/cameras/${id}/zones`),
+  createZone: (id, data) => api.post(`/cameras/${id}/zones`, data),
+  deleteZone: (id, zoneId) => api.delete(`/cameras/${id}/zones/${zoneId}`),
 }
 
 export const detections = {

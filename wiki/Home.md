@@ -15,6 +15,7 @@ The full system — backend, frontend, and AI — runs as a single systemd servi
 ## Feature Summary
 
 - YOLO AI detection (people, vehicles, animals, custom open-vocab classes)
+- Detection zones — per-camera include/exclude regions, off by default
 - Face recognition with a local face library
 - Live MJPEG streams with motion and detection overlay
 - Detection events saved as images + optional video clips (5s pre-roll / 10s post-roll by default)

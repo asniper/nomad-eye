@@ -85,6 +85,21 @@ Adjust in **Settings → Detection → Motion threshold**. Vehicles have an extr
 
 ---
 
+## Detection Zones
+
+Off by default — turn it on in **Settings → Detection → Detection zones**, then draw zones per camera on the **Cameras** page (**Zones** button on each camera's card).
+
+A zone is a polygon you draw over a snapshot of that camera's view, one of two types:
+
+- **Exclude zone** — detections whose center point falls inside are dropped entirely. Optionally scoped to specific categories; leave categories unchecked to apply to everything.
+- **Include zone** — restricts a category to *only* count inside the zone. If you draw an include zone scoped to `people`, people detected anywhere outside it are ignored — but other categories with no matching include zone remain unrestricted.
+
+**A stationary object that keeps false-positiving as a moving vehicle** (a parked trailer, a boat on a trailer, anything permanently sitting where the vehicle motion filter above isn't quite catching it) is exactly what an exclude zone scoped to `vehicles` is for: draw a tight polygon around that spot, and any vehicle-category detection centered there gets dropped before it can ever create an event — regardless of how much pixel-level motion noise (shadows, IR flicker, wind) happens to trigger the underlying motion/YOLO pass. This layers on top of the 5%-motion-ratio filter, not instead of it; if the trailer is still slipping through despite that filter, a zone is the more reliable fix since it doesn't depend on tuning a global sensitivity number that also affects every other vehicle on that camera.
+
+Zones don't affect the motion detector itself or the live overlay — they filter *after* a detection has already been made, right before it would become an event. A detection dropped by a zone never creates a database record, screenshot, clip, or notification.
+
+---
+
 ## ARM vs x86-64 Performance
 
 On ARM64 (e.g., Arduino Uno Q) without a GPU, inference runs on the CPU via PyTorch (through `ultralytics`), or via ONNX Runtime if a matching `.onnx` export is present.

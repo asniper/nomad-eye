@@ -61,6 +61,7 @@ For each camera you can configure:
 | **Face sensitivity** | `fast` / `normal` / `thorough` — trades face-detection accuracy for CPU |
 | **Night mode** | Hardware IR (on supported cameras) or software night-vision processing |
 | **Image adjustments** | Hardware (v4l2) or software brightness/contrast controls |
+| **Detection zones** | Draw include/exclude regions to ignore or restrict parts of the frame — see [AI Detection → Detection Zones](AI-Detection#detection-zones). Off by default; enable in Settings → Detection first. |
 
 Resolution, frame rate, and AI detection on/off are **global** settings, not per-camera — see Settings → Detection. Motion detection always runs on every camera (there's no per-camera on/off); only its global sensitivity (motion threshold/scale) is adjustable. There's no rotation control.
 

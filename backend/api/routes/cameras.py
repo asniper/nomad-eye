@@ -5,6 +5,7 @@ import os
 import sqlite3
 import cv2
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Optional
 from api.routes.auth import require_auth, require_operator, validate_session_token
@@ -37,6 +38,13 @@ class AdjustmentsBody(BaseModel):
 class FaceSettingsBody(BaseModel):
     face_detection_enabled: Optional[bool] = None
     face_sensitivity: Optional[str] = None
+
+
+class ZoneCreate(BaseModel):
+    name: str = ''
+    zone_type: str  # 'include' | 'exclude'
+    categories: Optional[list] = None  # None/empty = applies to all categories
+    points: list  # [[x, y], ...] normalized 0-1 floats, at least 3 points
 
 
 def _get_usb_id(video_path: str) -> str:
@@ -420,6 +428,89 @@ def set_face_settings(
     }
 
 
+def _zone_row_to_dict(row) -> dict:
+    return {
+        "id": row["id"],
+        "camera_id": row["camera_id"],
+        "name": row["name"],
+        "zone_type": row["zone_type"],
+        "categories": json.loads(row["categories"]) if row["categories"] else None,
+        "points": json.loads(row["points"]),
+        "created_at": row["created_at"],
+    }
+
+
+def _refresh_pipeline_zones(db: sqlite3.Connection, camera_id: int):
+    """Reload this camera's zones from the DB into the pipeline's in-memory cache
+    (the detection hot path reads that cache, never the DB, per detection)."""
+    if _pipeline is None:
+        return
+    rows = db.execute("SELECT * FROM camera_zones WHERE camera_id=?", (camera_id,)).fetchall()
+    zones = [
+        {
+            "zone_type": r["zone_type"],
+            "categories": set(json.loads(r["categories"])) if r["categories"] else None,
+            "points": [tuple(p) for p in json.loads(r["points"])],
+        }
+        for r in rows
+    ]
+    _pipeline.set_camera_zones(camera_id, zones)
+
+
+@router.get("/{camera_id}/zones")
+def list_zones(camera_id: int, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+    rows = db.execute(
+        "SELECT * FROM camera_zones WHERE camera_id=? ORDER BY created_at", (camera_id,)
+    ).fetchall()
+    return [_zone_row_to_dict(r) for r in rows]
+
+
+@router.post("/{camera_id}/zones")
+def create_zone(
+    camera_id: int,
+    body: ZoneCreate,
+    db: sqlite3.Connection = Depends(get_db),
+    _=Depends(require_operator),
+):
+    if body.zone_type not in ('include', 'exclude'):
+        raise HTTPException(status_code=400, detail="zone_type must be 'include' or 'exclude'")
+    if not body.points or len(body.points) < 3:
+        raise HTTPException(status_code=400, detail="A zone needs at least 3 points")
+    for p in body.points:
+        if len(p) != 2 or not all(0.0 <= float(c) <= 1.0 for c in p):
+            raise HTTPException(status_code=400, detail="Points must be [x, y] pairs normalized 0.0-1.0")
+
+    cur = db.execute(
+        "INSERT INTO camera_zones (camera_id, name, zone_type, categories, points, created_at) "
+        "VALUES (?, ?, ?, ?, ?, datetime('now'))",
+        (
+            camera_id, body.name.strip(), body.zone_type,
+            json.dumps(body.categories) if body.categories else None,
+            json.dumps(body.points),
+        )
+    )
+    db.commit()
+    _refresh_pipeline_zones(db, camera_id)
+    row = db.execute("SELECT * FROM camera_zones WHERE id=?", (cur.lastrowid,)).fetchone()
+    return _zone_row_to_dict(row)
+
+
+@router.delete("/{camera_id}/zones/{zone_id}")
+def delete_zone(
+    camera_id: int,
+    zone_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    _=Depends(require_operator),
+):
+    row = db.execute("SELECT id FROM camera_zones WHERE id=? AND camera_id=?", (zone_id, camera_id)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    db.execute("DELETE FROM camera_zones WHERE id=?", (zone_id,))
+    db.commit()
+    _refresh_pipeline_zones(db, camera_id)
+    return {"success": True}
+
+
 @router.post("/{camera_id}/overlay")
 def toggle_overlay(camera_id: int, enabled: bool, _=Depends(require_operator)):
     if _pipeline:
@@ -496,6 +587,23 @@ def set_night_mode(
             cam.set_night_mode(mode)
             hw = cam._night_mode_hw
     return {"ok": True, "night_mode": mode, "hw": hw}
+
+
+@router.get("/{camera_id}/snapshot")
+def get_snapshot(camera_id: int, _=Depends(require_auth)):
+    """One current JPEG frame — used as the background image for the zone editor."""
+    if _pipeline is None:
+        raise HTTPException(status_code=503, detail="Pipeline not ready")
+    cam = next((c for c in _pipeline._cameras if c.camera_id == camera_id), None)
+    if not cam or not cam.is_alive():
+        raise HTTPException(status_code=404, detail="Camera not available")
+    frame_obj = cam.get_frame()
+    if frame_obj is None:
+        raise HTTPException(status_code=503, detail="No frame available yet")
+    ok, jpeg = cv2.imencode('.jpg', frame_obj.data, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to encode frame")
+    return Response(content=jpeg.tobytes(), media_type="image/jpeg")
 
 
 @router.websocket("/{camera_id}/stream")

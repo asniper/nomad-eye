@@ -9,6 +9,7 @@ Self-hosted AI security camera system — runs entirely on-device, no cloud requ
 ## Features
 
 - **AI detection** — YOLO-based detection for people, vehicles, animals, and custom classes
+- **Detection zones** — draw include/exclude regions per camera to ignore or restrict parts of the frame (off by default)
 - **Face recognition** — identify known faces and build a local face library from captures
 - **Live MJPEG streams** — real-time video with motion and detection overlay
 - **Detection events** — saves image snapshots and H.264 video clips (pre-roll + post-roll) locally; watch clips inline or download from the event detail page

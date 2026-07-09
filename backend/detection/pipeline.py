@@ -76,6 +76,43 @@ def _bbox_has_motion(mask, bbox, min_ratio=0.0):
         return (region > 0).sum() / region.size >= min_ratio
     return bool((region > 0).any())
 
+def _point_in_polygon(x, y, points):
+    """Ray casting. points is a list of (x, y) tuples, same units as x/y."""
+    n = len(points)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = points[i]
+        xj, yj = points[j]
+        if (yi > y) != (yj > y):
+            x_intersect = (xj - xi) * (y - yi) / (yj - yi) + xi
+            if x < x_intersect:
+                inside = not inside
+        j = i
+    return inside
+
+def _zone_filter_detections(detections, zones, frame_shape):
+    """Drop detections inside an exclude zone (matching category, or all-category);
+    if any include zones exist for a category, restrict that category to inside them.
+    Zone points are normalized 0-1 so they're resolution-independent."""
+    if not zones:
+        return detections
+    h, w = frame_shape[:2]
+    include_zones = [z for z in zones if z['zone_type'] == 'include']
+    exclude_zones = [z for z in zones if z['zone_type'] == 'exclude']
+    kept = []
+    for d in detections:
+        cx = (d.bbox[0] + d.bbox[2]) / 2 / w
+        cy = (d.bbox[1] + d.bbox[3]) / 2 / h
+        if any((not z['categories'] or d.category in z['categories']) and _point_in_polygon(cx, cy, z['points'])
+               for z in exclude_zones):
+            continue
+        matching_includes = [z for z in include_zones if not z['categories'] or d.category in z['categories']]
+        if matching_includes and not any(_point_in_polygon(cx, cy, z['points']) for z in matching_includes):
+            continue
+        kept.append(d)
+    return kept
+
 def _match_detection(detection, active_events, frame_shape):
     """Return the best matching active event for a detection, or None if it's new."""
     h, w = frame_shape[:2]
@@ -162,6 +199,9 @@ class DetectionPipeline:
         self._clip_lock = threading.Lock()
         self._last_clip_push: dict = {}    # camera_id -> float
         self._clip_meta_cache: dict = {}   # camera_id -> (cam_name, tz_name, cached_at)
+        # Detection zones — off by default; a no-op when no zones are configured either way.
+        self._zones_enabled: bool = False
+        self._camera_zones: dict = {}      # camera_id -> list of zone dicts
 
     def start(self):
         self._running = True
@@ -217,6 +257,17 @@ class DetectionPipeline:
     def set_camera_face_sensitivity(self, camera_id: int, sensitivity: str):
         if sensitivity in ('fast', 'normal', 'thorough'):
             self._face_cam_sensitivity[camera_id] = sensitivity
+
+    def set_zones_enabled(self, enabled: bool):
+        self._zones_enabled = enabled
+
+    def set_camera_zones(self, camera_id: int, zones: list):
+        """zones: list of {zone_type, categories: set|None, points: [(x,y),...]}.
+        Called after any zone CRUD so the hot path never hits the DB per detection."""
+        if zones:
+            self._camera_zones[camera_id] = zones
+        else:
+            self._camera_zones.pop(camera_id, None)
 
     def set_ai_enabled(self, enabled: bool):
         self._ai_enabled = enabled
@@ -845,6 +896,10 @@ class DetectionPipeline:
 
     def _handle_detections(self, cam, frame, detections, now):
         """Persist detections: update overlay, create/update events, schedule screenshots."""
+        if self._zones_enabled:
+            zones = self._camera_zones.get(cam.camera_id)
+            if zones:
+                detections = _zone_filter_detections(detections, zones, frame.shape)
         if not detections:
             return
         self._latest_detections[cam.camera_id] = detections
