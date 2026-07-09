@@ -15,7 +15,8 @@ Self-hosted AI security camera system — runs entirely on-device, no cloud requ
 - **Notifications** — push via ntfy (free, no account needed), SMS via Twilio or carrier email gateway, email via SMTP; rule-based by category, time window, and frequency
 - **Presence detection** — automatically switch device status based on whether your phone is on the local network (ARP-based, no app required)
 - **WiFi management** — scan, connect, and forget networks from the UI; captive portal hotspot for initial setup
-- **Tailscale remote access** — in-app setup flow with node sharing guide
+- **Tailscale remote access** — in-app setup flow with node sharing guide; one-click upgrade to a real HTTPS certificate
+- **HTTPS** — self-signed by default on port 443, upgradeable to a trusted Let's Encrypt-backed certificate via Tailscale
 - **External storage** — mount, format, and set primary USB drives or SD cards
 - **OTA updates** — check and install from GitHub; optional daily auto-update at 3 AM
 - **Multi-user accounts** — admin/operator/viewer roles with full user management

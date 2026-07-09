@@ -32,6 +32,26 @@ if [ "$ACTION" = "arp-scan" ]; then
     exit 0
 fi
 
+if [ "$ACTION" = "tls-enable-tailscale" ]; then
+    # `|| true` so a failure here (Tailscale not connected, no DNSName yet) degrades to
+    # an empty string instead of tripping `set -e` mid-pipeline and skipping the
+    # friendly error check below with a raw Python traceback instead.
+    TS_HOSTNAME=$(tailscale status --json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['Self']['DNSName'].rstrip('.'))" 2>/dev/null || true)
+    if [ -z "$TS_HOSTNAME" ]; then
+        echo "Could not determine Tailscale MagicDNS hostname — is Tailscale connected and MagicDNS enabled?" >&2
+        exit 1
+    fi
+    # Redirect stdout — `tailscale cert` prints its own status line, which would
+    # otherwise get mixed into the hostname this script echoes on success.
+    tailscale cert --cert-file /etc/nginx/ssl/nomadeye.crt --key-file /etc/nginx/ssl/nomadeye.key "$TS_HOSTNAME" >/dev/null
+    chown root:www-data /etc/nginx/ssl/nomadeye.key
+    chmod 640 /etc/nginx/ssl/nomadeye.key
+    chmod 644 /etc/nginx/ssl/nomadeye.crt
+    systemctl reload nginx
+    echo "$TS_HOSTNAME"
+    exit 0
+fi
+
 # All other actions require a valid device name
 if ! echo "$DEVICE" | grep -qE '^[a-z0-9]{1,32}$'; then
     echo "Invalid device name: $DEVICE" >&2

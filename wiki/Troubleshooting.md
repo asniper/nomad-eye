@@ -160,6 +160,28 @@ sudo tailscale up
 
 ---
 
+## HTTPS / certificate warnings
+
+**Browser says the connection isn't private / certificate not trusted.** Expected the first time you visit `https://<device-ip>` — the device uses a self-signed certificate for LAN access, since it has no public domain for a real CA to verify. Click through the warning (in Chrome: Advanced → Proceed) once; browsers remember the exception afterward. See [Remote Access → HTTPS](Remote-Access#https) for a trusted-certificate alternative via Tailscale.
+
+**"Enable HTTPS via Tailscale" fails.** Most common cause: HTTPS Certificates isn't enabled for your tailnet. Check the [Tailscale admin console](https://login.tailscale.com/admin/dns) → DNS tab → HTTPS Certificates. Also confirm Tailscale is actually connected (`tailscale status`) and MagicDNS is enabled — `tailscale cert` needs both.
+
+**HTTPS doesn't work at all (connection refused on 443).** Check that nginx is actually listening on 443:
+
+```bash
+sudo ss -tlnp | grep :443
+sudo nginx -t
+```
+
+If `nginx -t` fails, the TLS certificate files may be missing — regenerate them:
+
+```bash
+sudo bash /opt/nomad-eye/deploy/generate-self-signed-cert.sh
+sudo systemctl restart nginx
+```
+
+---
+
 ## Logged out unexpectedly / can't log in after updating
 
 **Everyone was signed out after an update.** Expected exactly once if you updated across the multi-user-accounts change — old browser sessions used a different auth mechanism that isn't recognized anymore. Just log in again with the same username/password as before; see [Users](Users#upgrading-from-an-older-version).

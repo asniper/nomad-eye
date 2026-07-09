@@ -103,6 +103,7 @@ export const network = {
   tailscaleUp: (authKey = '') => api.post('/network/tailscale/up', { auth_key: authKey }),
   tailscaleDown: () => api.post('/network/tailscale/down'),
   tailscaleLogout: () => api.post('/network/tailscale/logout'),
+  tailscaleEnableHttps: () => api.post('/network/tailscale/enable-https'),
 }
 
 export const settings = {

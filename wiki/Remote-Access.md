@@ -50,6 +50,16 @@ MagicDNS hostnames require your accessing device to also be on the tailnet. Tail
 
 ---
 
+## HTTPS
+
+Nomad Eye serves HTTPS on port 443 out of the box, using a self-signed certificate generated at install time — browsers will show a one-time "not trusted" warning for it, which is expected for a self-hosted device with no public domain.
+
+For a real, browser-trusted certificate instead: once Tailscale is connected and MagicDNS is enabled, go to **Settings → Network → Tailscale Remote Access → Enable HTTPS via Tailscale**. This issues a genuine Let's Encrypt-backed certificate for your device's `.ts.net` hostname (via `tailscale cert`) and points nginx at it — no more browser warning at `https://<hostname>.your-tailnet.ts.net`.
+
+This requires **HTTPS Certificates** to be turned on for your tailnet — check the [Tailscale admin console](https://login.tailscale.com/admin/dns) under DNS settings if the button fails with a certificate error. The Tailscale-issued certificate only covers the `.ts.net` hostname, not the device's plain LAN IP — local network access still uses the self-signed certificate.
+
+---
+
 ## Setting the Notification Link
 
 Notification messages (ntfy, SMS, and email alike) include a link back to the detection event. For remote access links to work from anywhere, point that link at your Tailscale address:

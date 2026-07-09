@@ -37,7 +37,8 @@ This handles everything: creating the service user, installing system deps, clon
 repo, installing Python/Node dependencies, downloading the default AI model, building the
 frontend, creating the data directories, configuring sudoers, installing and starting both
 systemd services (backend + network/hotspot-fallback), installing the NetworkManager
-captive-portal dispatcher script, and configuring nginx.
+captive-portal dispatcher script, generating a self-signed TLS certificate, and configuring
+nginx for both HTTP and HTTPS.
 
 ---
 
@@ -61,7 +62,7 @@ The `video` group is required for camera device access (`/dev/video*`).
 ```bash
 sudo apt update
 sudo apt install -y python3 python3-pip python3-venv nodejs npm git \
-    libopencv-dev python3-opencv network-manager curl nginx ffmpeg arp-scan
+    libopencv-dev python3-opencv network-manager curl nginx ffmpeg arp-scan openssl
 ```
 
 ### 3. Clone the repository
@@ -139,11 +140,20 @@ sudo cp /opt/nomad-eye/deploy/99-nomadeye-captive /etc/NetworkManager/dispatcher
 sudo chmod +x /etc/NetworkManager/dispatcher.d/99-nomadeye-captive
 ```
 
-### 11. Configure nginx
+### 11. Generate a self-signed TLS certificate
 
-The backend only listens on `127.0.0.1:8080` — nginx is what exposes the UI on port 80:
+Needed for the HTTPS listener nginx configures in the next step:
 
 ```bash
+sudo bash /opt/nomad-eye/deploy/generate-self-signed-cert.sh
+```
+
+### 12. Configure nginx
+
+The backend only listens on `127.0.0.1:8080` — nginx is what exposes the UI on port 80 (HTTP) and 443 (HTTPS, self-signed by default — see [Remote Access → HTTPS](Remote-Access#https) for upgrading to a trusted certificate):
+
+```bash
+sudo cp /opt/nomad-eye/deploy/nginx-locations.conf /etc/nginx/nomadeye-locations.conf
 sudo cp /opt/nomad-eye/deploy/nginx.conf /etc/nginx/sites-available/nomad-eye
 sudo ln -sf /etc/nginx/sites-available/nomad-eye /etc/nginx/sites-enabled/nomad-eye
 sudo rm -f /etc/nginx/sites-enabled/default
@@ -186,7 +196,7 @@ Open a browser and go to:
 http://<device-ip>
 ```
 
-The web UI should load (served by nginx on port 80). Log in with the default credentials:
+The web UI should load (served by nginx on port 80). HTTPS is also available at `https://<device-ip>` (port 443) — browsers will show a one-time trust warning since it's a self-signed certificate; see [Remote Access → HTTPS](Remote-Access#https) for upgrading to a trusted one. Log in with the default credentials:
 
 | Field | Default |
 |---|---|

@@ -8,7 +8,7 @@ sudo apt update && sudo apt upgrade -y
 
 # Install system dependencies
 sudo apt install -y python3 python3-pip python3-venv nodejs npm git \
-    libopencv-dev python3-opencv network-manager curl nginx ffmpeg arp-scan
+    libopencv-dev python3-opencv network-manager curl nginx ffmpeg arp-scan openssl
 
 # Create service user if it does not exist
 if ! id -u nomadeye &>/dev/null; then
@@ -85,7 +85,11 @@ if command -v tailscale &>/dev/null; then
     sudo tailscale set --operator=nomadeye
 fi
 
-# Configure nginx as reverse proxy
+# Generate a self-signed TLS cert for LAN HTTPS access (idempotent, skips if one exists)
+sudo bash "$REPO_DIR/deploy/generate-self-signed-cert.sh"
+
+# Configure nginx as reverse proxy (HTTP on 80, HTTPS on 443 with the cert above)
+sudo cp "$REPO_DIR/deploy/nginx-locations.conf" /etc/nginx/nomadeye-locations.conf
 sudo cp "$REPO_DIR/deploy/nginx.conf" /etc/nginx/sites-available/nomad-eye
 sudo ln -sf /etc/nginx/sites-available/nomad-eye /etc/nginx/sites-enabled/nomad-eye
 sudo rm -f /etc/nginx/sites-enabled/default

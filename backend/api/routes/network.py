@@ -256,3 +256,21 @@ def tailscale_status(_=Depends(require_admin)):
         }
     except Exception:
         return {"installed": True, "connected": False, "ip": None, "hostname": None, "dns_name": None}
+
+
+@router.post("/tailscale/enable-https")
+def tailscale_enable_https(_=Depends(require_admin)):
+    """Issue a real Let's Encrypt-backed cert for this device's *.ts.net hostname via
+    `tailscale cert`, and point nginx's HTTPS listener at it — replacing the self-signed
+    LAN cert. Requires Tailscale to be connected and HTTPS Certificates enabled on the
+    tailnet (a checkbox in the Tailscale admin console, off by default on some plans)."""
+    try:
+        result = subprocess.run(
+            ['/usr/bin/sudo', STORAGE_HELPER, 'tls-enable-tailscale'],
+            capture_output=True, text=True, timeout=30
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail='Timed out waiting for tailscale cert')
+    if result.returncode != 0:
+        raise HTTPException(status_code=500, detail=result.stderr.strip() or 'Failed to issue certificate')
+    return {"success": True, "hostname": result.stdout.strip()}
