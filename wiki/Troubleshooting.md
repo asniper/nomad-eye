@@ -160,6 +160,30 @@ sudo tailscale up
 
 ---
 
+## Logged out unexpectedly / can't log in after updating
+
+**Everyone was signed out after an update.** Expected exactly once if you updated across the multi-user-accounts change — old browser sessions used a different auth mechanism that isn't recognized anymore. Just log in again with the same username/password as before; see [Users](Users#upgrading-from-an-older-version).
+
+**Forgot your password and there's only one admin account.** There's no password-reset-by-email flow (no email server assumption for a self-hosted device). Reset it directly in the database:
+
+```bash
+sudo /opt/nomad-eye/backend/venv/bin/python -c "
+import sqlite3, sys
+sys.path.insert(0, '/opt/nomad-eye/backend')
+from security import hash_password
+db = sqlite3.connect('/opt/nomad-eye/data/db/nomadeye.db')
+db.execute(\"UPDATE users SET password_hash=? WHERE username=?\", (hash_password('newpassword'), 'admin'))
+db.execute(\"DELETE FROM sessions WHERE user_id=(SELECT id FROM users WHERE username='admin')\")
+db.commit()
+"
+```
+
+Replace `newpassword` and `admin` as needed, then log in with the new password.
+
+**A demoted/deleted user is still logged in.** Sessions are only invalidated when an admin resets that user's password (or the user changes it themselves) — just changing their role doesn't kill their existing session, though the new role is enforced on their very next request regardless.
+
+---
+
 ## Update fails
 
 **git credentials / permission error.** The service runs as the `nomadeye` user. If `/opt/nomad-eye` is owned by `root`, git pull will fail.

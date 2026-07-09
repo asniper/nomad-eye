@@ -1,5 +1,4 @@
 import os
-import secrets
 import sqlite3
 import subprocess
 import threading
@@ -9,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from api.routes.auth import require_auth
+from api.routes.auth import require_admin
 from config.settings import get_settings
 
 router = APIRouter()
@@ -160,7 +159,7 @@ def start_auto_update_scheduler():
 
 
 @router.get("/stats")
-def system_stats(_=Depends(require_auth)):
+def system_stats(_=Depends(require_admin)):
     cpu = psutil.cpu_percent(interval=0.5)
     mem = psutil.virtual_memory()
     with open('/proc/uptime') as f:
@@ -198,7 +197,7 @@ def system_stats(_=Depends(require_auth)):
 
 
 @router.post("/restart")
-def restart_service(_=Depends(require_auth)):
+def restart_service(_=Depends(require_admin)):
     def _do_restart():
         time.sleep(1.0)
         subprocess.Popen(
@@ -211,7 +210,7 @@ def restart_service(_=Depends(require_auth)):
 
 
 @router.post("/reboot")
-def reboot_system(_=Depends(require_auth)):
+def reboot_system(_=Depends(require_admin)):
     def _do_reboot():
         time.sleep(1.0)
         subprocess.Popen(
@@ -224,7 +223,7 @@ def reboot_system(_=Depends(require_auth)):
 
 
 @router.get("/update-status")
-def update_status_endpoint(_=Depends(require_auth)):
+def update_status_endpoint(_=Depends(require_admin)):
     version, sha, last_updated = _current_version()
     channel = _db_get('update_channel', 'releases')
     auto_update = _db_get('auto_update_enabled', '0') == '1'
@@ -255,7 +254,7 @@ def update_status_endpoint(_=Depends(require_auth)):
 
 
 @router.post("/update")
-def trigger_update(background_tasks: BackgroundTasks, _=Depends(require_auth)):
+def trigger_update(background_tasks: BackgroundTasks, _=Depends(require_admin)):
     if _update_status["in_progress"]:
         raise HTTPException(status_code=409, detail="Update already in progress")
     channel = _db_get('update_channel', 'releases')
@@ -263,21 +262,8 @@ def trigger_update(background_tasks: BackgroundTasks, _=Depends(require_auth)):
     return {"updating": True, "channel": channel}
 
 
-@router.post("/change-password")
-def change_password(body: dict, _=Depends(require_auth)):
-    current = body.get('current_password', '')
-    new_pw = body.get('new_password', '')
-    if not new_pw or len(new_pw) < 4:
-        raise HTTPException(status_code=400, detail='New password must be at least 4 characters')
-    from api.routes.auth import _get_admin_password
-    if not secrets.compare_digest(current, _get_admin_password()):
-        raise HTTPException(status_code=401, detail='Current password is incorrect')
-    _db_set('admin_password', new_pw)
-    return {"changed": True}
-
-
 @router.post("/update-settings")
-def save_update_settings(body: dict, _=Depends(require_auth)):
+def save_update_settings(body: dict, _=Depends(require_admin)):
     if 'channel' in body:
         if body['channel'] not in ('releases', 'main'):
             raise HTTPException(status_code=400, detail="channel must be 'releases' or 'main'")

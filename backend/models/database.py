@@ -119,6 +119,23 @@ def init_db():
             status TEXT NOT NULL,
             error TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('admin', 'operator', 'viewer')) DEFAULT 'viewer',
+            created_at TEXT NOT NULL,
+            last_login TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
     """)
     db.commit()
     try:
@@ -128,6 +145,11 @@ def init_db():
         pass
     try:
         db.execute("CREATE INDEX IF NOT EXISTS idx_detections_event_conf ON detections (event_id, confidence DESC)")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions (expires_at)")
         db.commit()
     except sqlite3.OperationalError:
         pass
@@ -251,4 +273,27 @@ def init_db():
         db.commit()
     except Exception:
         pass
+
+    # One-time migration: seed the first admin user from the legacy single-admin
+    # credential (app_config, always plaintext pre-migration) or .env defaults.
+    # Safe to re-run — only fires while the users table is still empty.
+    try:
+        from security import hash_password
+        has_users = db.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+        if not has_users:
+            legacy_user_row = db.execute("SELECT value FROM app_config WHERE key='admin_username'").fetchone()
+            legacy_pass_row = db.execute("SELECT value FROM app_config WHERE key='admin_password'").fetchone()
+            seed_username = legacy_user_row[0] if legacy_user_row and legacy_user_row[0] else cfg.admin_username
+            seed_password = legacy_pass_row[0] if legacy_pass_row and legacy_pass_row[0] else cfg.admin_password
+            db.execute(
+                "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, 'admin', datetime('now'))",
+                (seed_username, hash_password(seed_password))
+            )
+            db.commit()
+    except Exception as e:
+        # Not re-raised — a fresh install must still boot even if this migration has a
+        # bug — but silent failure here means total lockout with zero diagnostic trail,
+        # so at least surface it in the service log (journalctl -u nomad-eye-backend).
+        print(f"WARNING: failed to seed initial admin user: {e}")
+
     db.close()

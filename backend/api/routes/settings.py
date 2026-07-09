@@ -4,7 +4,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from models.database import get_db
-from api.routes.auth import require_auth
+from api.routes.auth import require_admin
 
 router = APIRouter()
 
@@ -22,7 +22,7 @@ class ConfigItem(BaseModel):
 
 
 @router.get("/models")
-def get_models(_=Depends(require_auth)):
+def get_models(_=Depends(require_admin)):
     import platform
     from detection.detector import MODELS
     machine = platform.machine().lower()
@@ -39,13 +39,13 @@ def get_models(_=Depends(require_auth)):
 
 
 @router.get("/")
-def get_settings_all(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def get_settings_all(db: sqlite3.Connection = Depends(get_db), _=Depends(require_admin)):
     rows = db.execute("SELECT key, value FROM app_config").fetchall()
     return {r["key"]: r["value"] for r in rows}
 
 
 @router.post("/")
-async def set_setting(body: ConfigItem, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+async def set_setting(body: ConfigItem, db: sqlite3.Connection = Depends(get_db), _=Depends(require_admin)):
     db.execute("INSERT INTO app_config (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                (body.key, body.value))
     db.commit()
@@ -137,7 +137,7 @@ async def set_setting(body: ConfigItem, db: sqlite3.Connection = Depends(get_db)
 
 
 @router.get("/notification-url")
-def get_notification_url(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def get_notification_url(db: sqlite3.Connection = Depends(get_db), _=Depends(require_admin)):
     from notifications.link import get_notification_base_url
     return {"url": get_notification_base_url(db)}
 

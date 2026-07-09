@@ -3,7 +3,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from models.database import get_db
-from api.routes.auth import require_auth
+from api.routes.auth import require_auth, require_operator
 
 router = APIRouter()
 _scanner = None
@@ -30,7 +30,7 @@ def list_devices(db: sqlite3.Connection = Depends(get_db), _=Depends(require_aut
 
 
 @router.post("/devices")
-def add_device(body: DeviceCreate, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def add_device(body: DeviceCreate, db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     mac = body.mac_address.lower().strip()
     if not _MAC_RE.match(mac):
         raise HTTPException(status_code=400, detail="Invalid MAC address — expected XX:XX:XX:XX:XX:XX")
@@ -47,7 +47,7 @@ def add_device(body: DeviceCreate, db: sqlite3.Connection = Depends(get_db), _=D
 
 
 @router.patch("/devices/{device_id}")
-def patch_device(device_id: int, body: dict, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def patch_device(device_id: int, body: dict, db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     fields, values = [], []
     if 'active' in body:
         fields.append('active = ?')
@@ -66,7 +66,7 @@ def patch_device(device_id: int, body: dict, db: sqlite3.Connection = Depends(ge
 
 
 @router.delete("/devices/{device_id}")
-def delete_device(device_id: int, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def delete_device(device_id: int, db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     db.execute("DELETE FROM presence_devices WHERE id = ?", (device_id,))
     db.commit()
     return {"deleted": device_id}

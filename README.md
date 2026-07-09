@@ -18,6 +18,7 @@ Self-hosted AI security camera system — runs entirely on-device, no cloud requ
 - **Tailscale remote access** — in-app setup flow with node sharing guide
 - **External storage** — mount, format, and set primary USB drives or SD cards
 - **OTA updates** — check and install from GitHub; optional daily auto-update at 3 AM
+- **Multi-user accounts** — admin/operator/viewer roles with full user management
 
 ---
 

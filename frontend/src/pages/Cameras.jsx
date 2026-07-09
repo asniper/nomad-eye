@@ -462,7 +462,10 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
 
   useEffect(() => {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${proto}://${window.location.host}/api/cameras/${cam.id}/stream`)
+    // Browsers can't set an Authorization header on a WebSocket handshake, so the
+    // session token travels as a query param instead — see cameras.py's stream() route.
+    const token = localStorage.getItem('nomadeye_auth') || ''
+    const ws = new WebSocket(`${proto}://${window.location.host}/api/cameras/${cam.id}/stream?token=${encodeURIComponent(token)}`)
     wsRef.current = ws
     ws.binaryType = 'blob'
     ws.onopen = () => {
@@ -470,9 +473,16 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
       sendFilter(hiddenCategories)
       if (debugMode) ws.send(JSON.stringify({ debug: true }))
     }
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       setConnected(false)
-      if (!intentionalClose.current) {
+      // 1008 = the backend rejected/expired our session token (cameras.py's stream()
+      // route). Retrying with the same stale token would just loop forever every 3s —
+      // treat it like an HTTP 401 and force back to the login screen instead.
+      if (event.code === 1008) {
+        localStorage.removeItem('nomadeye_auth')
+        localStorage.removeItem('nomadeye_user')
+        window.location.href = '/'
+      } else if (!intentionalClose.current) {
         setTimeout(() => setWsKey(k => k + 1), 3000)
       }
       intentionalClose.current = false

@@ -3,7 +3,31 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useDeviceStatus } from '../context/DeviceStatusContext'
 import { getTimezone } from '../utils/dates'
+import ChangePasswordCard from './ChangePasswordCard'
 import logoNarrowUrl from '../assets/logo-narrow.png'
+
+function AccountMenu() {
+  const { user } = useAuth()
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="px-3 pb-2">
+      <div className="flex items-center justify-between px-1 mb-1.5">
+        <div className="min-w-0">
+          <p className="text-sm text-white truncate">{user?.username ?? 'Account'}</p>
+          <p className="text-xs text-white/40 capitalize">{user?.role ?? ''}</p>
+        </div>
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="text-xs text-white/60 hover:text-white px-2 py-1 rounded-md hover:bg-white/10 transition-colors shrink-0"
+        >
+          {open ? 'Close' : 'Change password'}
+        </button>
+      </div>
+      {open && <ChangePasswordCard />}
+    </div>
+  )
+}
 
 function NavClock() {
   const [time, setTime] = useState('')
@@ -45,9 +69,11 @@ const STATUS_OPTIONS = ['home', 'away', 'sleep', 'vacation']
 const STATUS_COLOR = { home: '#198F53', away: '#FFB800', sleep: '#3B82F6', vacation: '#EF4444' }
 
 export default function Layout({ children }) {
-  const { logout } = useAuth()
+  const { logout, user } = useAuth()
   const { deviceStatus, updateStatus } = useDeviceStatus()
   const [menuOpen, setMenuOpen] = useState(false)
+  // Settings has nothing a viewer can use — hide the nav item entirely for that role.
+  const visibleNav = nav.filter(item => item.to !== '/settings' || (user?.role ?? 'viewer') !== 'viewer')
 
   return (
     <div className="flex h-dvh overflow-hidden">
@@ -80,51 +106,51 @@ export default function Layout({ children }) {
         </div>
 
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-          {nav.map(({ to, label }) => (
-            <React.Fragment key={to}>
-              <NavLink
-                to={to}
-                end={to === '/'}
-                onClick={() => setMenuOpen(false)}
-                className={({ isActive }) =>
-                  `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-white/20 text-white font-semibold'
-                      : 'text-white/70 hover:bg-white/10 hover:text-white'
-                  }`
-                }
-              >
-                {label}
-              </NavLink>
-
-              {/* Device status + clock inline under Settings */}
-              {to === '/settings' && deviceStatus !== null && (
-                <>
-                  <div className="px-3 pb-1">
-                    <p className="text-xs text-white/40 mb-1.5">Device Status</p>
-                    <div className="flex gap-1">
-                      {STATUS_OPTIONS.map(s => (
-                        <button
-                          key={s}
-                          onClick={() => updateStatus(s)}
-                          className="flex-1 py-1 rounded text-xs font-medium capitalize transition-opacity hover:opacity-80 text-center"
-                          style={deviceStatus === s
-                            ? { background: STATUS_COLOR[s], color: '#fff' }
-                            : { background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.5)' }
-                          }
-                        >
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <NavClock />
-                </>
-              )}
-            </React.Fragment>
+          {visibleNav.map(({ to, label }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={to === '/'}
+              onClick={() => setMenuOpen(false)}
+              className={({ isActive }) =>
+                `block px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'bg-white/20 text-white font-semibold'
+                    : 'text-white/70 hover:bg-white/10 hover:text-white'
+                }`
+              }
+            >
+              {label}
+            </NavLink>
           ))}
+
+          {/* Device status + clock — available regardless of role */}
+          {deviceStatus !== null && (
+            <>
+              <div className="px-3 pb-1 pt-2">
+                <p className="text-xs text-white/40 mb-1.5">Device Status</p>
+                <div className="flex gap-1">
+                  {STATUS_OPTIONS.map(s => (
+                    <button
+                      key={s}
+                      onClick={() => updateStatus(s)}
+                      className="flex-1 py-1 rounded text-xs font-medium capitalize transition-opacity hover:opacity-80 text-center"
+                      style={deviceStatus === s
+                        ? { background: STATUS_COLOR[s], color: '#fff' }
+                        : { background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.5)' }
+                      }
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <NavClock />
+            </>
+          )}
         </nav>
 
+        <AccountMenu />
         <div className="p-3 border-t border-white/10">
           <button
             onClick={logout}

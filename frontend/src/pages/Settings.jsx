@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
-import { settings, detections as detectionsApi, storage as storageApi, system as systemApi, cameras as camerasApi, faces as facesApi, presence as presenceApi } from '../api/client'
+import ChangePasswordCard from '../components/ChangePasswordCard'
+import { settings, detections as detectionsApi, storage as storageApi, system as systemApi, cameras as camerasApi, faces as facesApi, presence as presenceApi, auth as authApi } from '../api/client'
 
 import { useAuth } from '../hooks/useAuth'
 import { useDeviceStatus } from '../context/DeviceStatusContext'
@@ -78,17 +79,32 @@ const TABS = [
   { id: 'network', label: 'Network' },
   { id: 'storage', label: 'Storage' },
   { id: 'system', label: 'System' },
+  { id: 'users', label: 'Users' },
 ]
 
+// Every tab except Faces touches system-level config or credentials — admin only.
+// Operators still get Faces (day-to-day face-library management); viewers get nothing here.
+function tabAllowed(tabId, isAdmin, isOperator) {
+  if (isAdmin) return true
+  if (tabId === 'faces') return isOperator
+  return false
+}
+
 export default function Settings() {
-  const { logout } = useAuth()
+  const { logout, user } = useAuth()
+  const isAdmin = (user?.role ?? 'viewer') === 'admin'
+  const isOperator = (user?.role ?? 'viewer') !== 'viewer'
   const { deviceStatus, updateStatus } = useDeviceStatus()
   const [allSettings, setAllSettings] = useState({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState({})
   const [saved, setSaved] = useState({})
   const [errors, setErrors] = useState({})
-  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'general')
+  const visibleTabs = TABS.filter(t => tabAllowed(t.id, isAdmin, isOperator))
+  const [tab, setTab] = useState(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab') || 'general'
+    return tabAllowed(requested, isAdmin, isOperator) ? requested : (visibleTabs[0]?.id ?? null)
+  })
 
   const changeTab = useCallback((id) => {
     setTab(id)
@@ -98,12 +114,13 @@ export default function Settings() {
   }, [])
 
   useEffect(() => {
+    if (!isAdmin) { setLoading(false); return }
     settings.getAll().then(r => {
       const s = r.data || {}
       setAllSettings(s)
       if (s.timezone) setTimezone(s.timezone)
     }).catch(() => {}).finally(() => setLoading(false))
-  }, [])
+  }, [isAdmin])
 
   const saveSetting = async (key, value) => {
     setSaving(s => ({ ...s, [key]: true }))
@@ -127,27 +144,36 @@ export default function Settings() {
     <div className="space-y-6">
       <div className="space-y-3">
         <h2 className="text-2xl font-bold" style={{ color: '#FFB800' }}>Settings</h2>
-        <div className="grid grid-cols-3 gap-1 md:flex md:gap-0 md:border-b md:border-[#3A3A3A]">
-          {TABS.map(t => (
-            <button
-              key={t.id}
-              onClick={() => changeTab(t.id)}
-              className={`py-2 px-1 text-sm font-medium transition-colors text-center rounded-md md:rounded-t-md md:rounded-b-none md:px-4 md:py-1.5 ${
-                tab === t.id
-                  ? 'text-[#FFB800] bg-[rgba(255,184,0,0.10)] md:bg-transparent md:border-b-2 md:border-[#FFB800] md:-mb-px'
-                  : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        {visibleTabs.length > 0 && (
+          <div className="grid grid-cols-3 gap-1 md:flex md:gap-0 md:border-b md:border-[#3A3A3A]">
+            {visibleTabs.map(t => (
+              <button
+                key={t.id}
+                onClick={() => changeTab(t.id)}
+                className={`py-2 px-1 text-sm font-medium transition-colors text-center rounded-md md:rounded-t-md md:rounded-b-none md:px-4 md:py-1.5 ${
+                  tab === t.id
+                    ? 'text-[#FFB800] bg-[rgba(255,184,0,0.10)] md:bg-transparent md:border-b-2 md:border-[#FFB800] md:-mb-px'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {visibleTabs.length === 0 && (
+        <Card title="No accessible settings">
+          <p className="text-sm text-gray-400">Your account role ({user?.role ?? 'viewer'}) doesn't have access to any settings pages. Ask an admin for a role change if you need one.</p>
+        </Card>
+      )}
 
       {tab === 'network' && <Network />}
       {tab === 'storage' && <StorageTab />}
       {tab === 'system' && <SystemTab allSettings={allSettings} saveSetting={saveSetting} saving={saving} saved={saved} />}
       {tab === 'faces' && <FacesTab />}
+      {tab === 'users' && <UsersTab />}
       {tab === 'detection' && <>
         <Card title="Detection">
           {/* AI enabled toggle */}
@@ -926,6 +952,192 @@ function CamerasCard({ allSettings, saveSetting, saving, saved }) {
   )
 }
 
+const ROLE_OPTIONS = ['admin', 'operator', 'viewer']
+const ROLE_HINT = {
+  admin: 'Full access, including managing other users.',
+  operator: 'Manages cameras, detections, faces, and notifications. No access to system/network/storage settings.',
+  viewer: 'Read-only — can view live streams and browse detections, no changes allowed.',
+}
+
+function UsersTab() {
+  return (
+    <div className="space-y-6">
+      <UsersCard />
+    </div>
+  )
+}
+
+function UsersCard() {
+  const { user: me } = useAuth()
+  const [users, setUsers] = useState(null)
+  const [error, setError] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [newUser, setNewUser] = useState({ username: '', password: '', role: 'viewer' })
+  const [resetTarget, setResetTarget] = useState(null)
+  const [resetPassword, setResetPassword] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(null)
+
+  const load = useCallback(() => {
+    authApi.users.list().then(r => setUsers(r.data)).catch(() => setUsers([]))
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const handleCreate = async () => {
+    setError('')
+    if (!newUser.username.trim() || newUser.password.length < 8) {
+      setError('Username is required and password must be at least 8 characters.')
+      return
+    }
+    setCreating(true)
+    try {
+      await authApi.users.create(newUser.username.trim(), newUser.password, newUser.role)
+      setNewUser({ username: '', password: '', role: 'viewer' })
+      load()
+    } catch (e) {
+      setError(e?.response?.data?.detail || 'Failed to create user.')
+    }
+    setCreating(false)
+  }
+
+  const handleRoleChange = async (u, role) => {
+    try {
+      await authApi.users.update(u.id, { role })
+      load()
+    } catch (e) {
+      setError(e?.response?.data?.detail || 'Failed to update role.')
+    }
+  }
+
+  const handleResetPassword = async () => {
+    if (resetPassword.length < 8) {
+      setError('Password must be at least 8 characters.')
+      return
+    }
+    try {
+      await authApi.users.update(resetTarget.id, { password: resetPassword })
+      setResetTarget(null)
+      setResetPassword('')
+    } catch (e) {
+      setError(e?.response?.data?.detail || 'Failed to reset password.')
+    }
+  }
+
+  const handleDelete = async (u) => {
+    if (confirmDelete !== u.id) { setConfirmDelete(u.id); return }
+    try {
+      await authApi.users.remove(u.id)
+      setConfirmDelete(null)
+      load()
+    } catch (e) {
+      setError(e?.response?.data?.detail || 'Failed to delete user.')
+    }
+  }
+
+  if (!users) return null
+
+  return (
+    <Card title="Users">
+      <p className="text-xs text-gray-500 mb-3">Manage who can log in and what they can do. The server enforces a new role on that user's very next request — but their browser won't show the right tabs/buttons for it until they log out and back in.</p>
+      {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
+
+      <div className="space-y-2 mb-5">
+        {users.map(u => {
+          const isSelf = u.id === me?.id
+          return (
+            <div key={u.id} className="flex flex-wrap items-center gap-2 py-2 border-b border-[#3A3A3A] last:border-0">
+              <div className="min-w-[10rem]">
+                <p className="text-sm text-white font-medium">{u.username} {isSelf && <span className="text-xs text-gray-500">(you)</span>}</p>
+                <p className="text-xs text-gray-500">{u.last_login ? `Last login: ${new Date(u.last_login).toLocaleString()}` : 'Never logged in'}</p>
+              </div>
+              <select
+                value={u.role}
+                onChange={e => handleRoleChange(u, e.target.value)}
+                className={inputCls}
+                title={ROLE_HINT[u.role]}
+              >
+                {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <button
+                onClick={() => { setResetTarget(u); setResetPassword(''); setError('') }}
+                className="px-3 py-1.5 rounded-md text-xs font-medium transition-opacity hover:opacity-80"
+                style={{ background: '#3A3A3A', color: '#ffffff' }}
+              >
+                Reset password
+              </button>
+              <button
+                onClick={() => handleDelete(u)}
+                disabled={isSelf}
+                title={isSelf ? "Can't delete your own account while logged in as it" : undefined}
+                className="px-3 py-1.5 rounded-md text-xs font-medium transition-colors disabled:opacity-40"
+                style={confirmDelete === u.id
+                  ? { background: '#EF4444', color: '#ffffff' }
+                  : { background: '#3A3A3A', color: '#ffffff' }
+                }
+              >
+                {confirmDelete === u.id ? 'Confirm delete' : 'Delete'}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+
+      {resetTarget && (
+        <div className="mb-5 p-3 rounded-md border border-[#3A3A3A]">
+          <p className="text-sm text-white mb-2">Reset password for <strong>{resetTarget.username}</strong></p>
+          <div className="flex gap-2 flex-wrap">
+            <input
+              type="password"
+              value={resetPassword}
+              onChange={e => setResetPassword(e.target.value)}
+              placeholder="New password (min 8 characters)"
+              className={inputCls}
+            />
+            <button onClick={handleResetPassword} className="px-3 py-1.5 rounded-md text-xs font-medium" style={{ background: '#FFB800', color: '#151925' }}>Save</button>
+            <button onClick={() => setResetTarget(null)} className="px-3 py-1.5 rounded-md text-xs font-medium text-gray-400 hover:text-gray-200">Cancel</button>
+          </div>
+          <p className="text-xs text-gray-500 mt-1.5">This signs that user out of any existing sessions.</p>
+        </div>
+      )}
+
+      <div className="border-t border-[#3A3A3A] pt-4">
+        <p className="text-sm font-medium text-white mb-2">Add user</p>
+        <div className="flex gap-2 flex-wrap items-start">
+          <input
+            value={newUser.username}
+            onChange={e => setNewUser(v => ({ ...v, username: e.target.value }))}
+            placeholder="Username"
+            className={inputCls}
+          />
+          <input
+            type="password"
+            value={newUser.password}
+            onChange={e => setNewUser(v => ({ ...v, password: e.target.value }))}
+            placeholder="Password (min 8 characters)"
+            className={inputCls}
+          />
+          <select
+            value={newUser.role}
+            onChange={e => setNewUser(v => ({ ...v, role: e.target.value }))}
+            className={inputCls}
+          >
+            {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+          <button
+            onClick={handleCreate}
+            disabled={creating}
+            className="px-3 py-1.5 rounded-md text-xs font-medium disabled:opacity-50"
+            style={{ background: '#FFB800', color: '#151925' }}
+          >
+            {creating ? 'Adding…' : 'Add'}
+          </button>
+        </div>
+        <p className="text-xs text-gray-500 mt-1.5">{ROLE_HINT[newUser.role]}</p>
+      </div>
+    </Card>
+  )
+}
+
 function FacesTab() {
   return (
     <div className="space-y-6">
@@ -1380,67 +1592,6 @@ function SystemSettingsCard({ allSettings, saveSetting, saving, saved }) {
   )
 }
 
-function ChangePasswordCard() {
-  const { logout } = useAuth()
-  const [current, setCurrent] = useState('')
-  const [next, setNext] = useState('')
-  const [confirm, setConfirm] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState(null)
-  const [done, setDone] = useState(false)
-
-  const submit = async (e) => {
-    e.preventDefault()
-    setError(null)
-    if (next !== confirm) { setError('Passwords do not match'); return }
-    if (next.length < 4) { setError('Password must be at least 4 characters'); return }
-    setSaving(true)
-    try {
-      await systemApi.changePassword(current, next)
-      setDone(true)
-      setCurrent(''); setNext(''); setConfirm('')
-      setTimeout(() => { setDone(false); logout() }, 2000)
-    } catch (e) {
-      setError(e?.response?.data?.detail || 'Failed to change password')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const fieldCls = "bg-[#3A3A3A] border border-[#484848] rounded-md px-3 py-1.5 text-sm text-white focus:outline-none w-full"
-
-  return (
-    <Card title="Change Password">
-      <form onSubmit={submit} className="space-y-3 max-w-sm">
-        <div>
-          <label className="text-xs text-gray-500 mb-1 block">Current password</label>
-          <input type="password" value={current} onChange={e => setCurrent(e.target.value)}
-            className={fieldCls} autoComplete="current-password" required />
-        </div>
-        <div>
-          <label className="text-xs text-gray-500 mb-1 block">New password</label>
-          <input type="password" value={next} onChange={e => setNext(e.target.value)}
-            className={fieldCls} autoComplete="new-password" required />
-        </div>
-        <div>
-          <label className="text-xs text-gray-500 mb-1 block">Confirm new password</label>
-          <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
-            className={fieldCls} autoComplete="new-password" required />
-        </div>
-        {error && <p className="text-sm text-red-400">{error}</p>}
-        {done && <p className="text-sm text-green-400">Password changed — logging out…</p>}
-        <button
-          type="submit"
-          disabled={saving || done}
-          className="px-4 py-1.5 rounded-md text-sm font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
-          style={{ background: '#FFB800', color: '#151925' }}
-        >
-          {saving ? 'Saving…' : 'Change password'}
-        </button>
-      </form>
-    </Card>
-  )
-}
 
 function StorageTab() {
   const [refreshKey, setRefreshKey] = useState(0)

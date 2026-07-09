@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 from models.database import get_db
-from api.routes.auth import require_auth
+from api.routes.auth import require_auth, require_operator
 import sqlite3
 
 router = APIRouter()
@@ -49,7 +49,7 @@ def list_contacts(db: sqlite3.Connection = Depends(get_db), _=Depends(require_au
     return [_row_to_contact(r) for r in db.execute("SELECT * FROM contacts").fetchall()]
 
 @router.post("/contacts")
-def create_contact(body: ContactCreate, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def create_contact(body: ContactCreate, db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     cursor = db.execute(
         "INSERT INTO contacts (name, type, address, carrier) VALUES (?,?,?,?)",
         (body.name, body.type, body.value, body.carrier)
@@ -59,7 +59,7 @@ def create_contact(body: ContactCreate, db: sqlite3.Connection = Depends(get_db)
     return _row_to_contact(row)
 
 @router.patch("/contacts/{contact_id}")
-def patch_contact(contact_id: int, body: dict, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def patch_contact(contact_id: int, body: dict, db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     if 'active' in body:
         db.execute("UPDATE contacts SET active = ? WHERE id = ?", (1 if body['active'] else 0, contact_id))
         db.commit()
@@ -69,14 +69,14 @@ def patch_contact(contact_id: int, body: dict, db: sqlite3.Connection = Depends(
     return _row_to_contact(row)
 
 @router.delete("/contacts/{contact_id}")
-def delete_contact(contact_id: int, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def delete_contact(contact_id: int, db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     db.execute("DELETE FROM contacts WHERE id = ?", (contact_id,))
     db.execute("DELETE FROM notification_rules WHERE contact_id = ?", (contact_id,))
     db.commit()
     return {"deleted": contact_id}
 
 @router.post("/contacts/{contact_id}/test")
-async def test_contact(contact_id: int, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+async def test_contact(contact_id: int, db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     contact = db.execute("SELECT * FROM contacts WHERE id = ?", (contact_id,)).fetchone()
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
@@ -117,7 +117,7 @@ def list_rules(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)
     return [_row_to_rule(r) for r in rows]
 
 @router.post("/rules")
-def create_rule(body: RuleCreate, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def create_rule(body: RuleCreate, db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     cursor = db.execute(
         "INSERT INTO notification_rules (contact_id, categories, labels, device_statuses, time_start, time_end, frequency) VALUES (?,?,?,?,?,?,?)",
         (
@@ -135,7 +135,7 @@ def create_rule(body: RuleCreate, db: sqlite3.Connection = Depends(get_db), _=De
     return _row_to_rule(row)
 
 @router.patch("/rules/{rule_id}")
-def patch_rule(rule_id: int, body: dict, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def patch_rule(rule_id: int, body: dict, db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     fields, values = [], []
     if 'active' in body:
         fields.append('active = ?'); values.append(1 if body['active'] else 0)
@@ -161,7 +161,7 @@ def patch_rule(rule_id: int, body: dict, db: sqlite3.Connection = Depends(get_db
     return _row_to_rule(row)
 
 @router.delete("/rules/{rule_id}")
-def delete_rule(rule_id: int, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def delete_rule(rule_id: int, db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     db.execute("DELETE FROM notification_rules WHERE id = ?", (rule_id,))
     db.commit()
     return {"deleted": rule_id}
@@ -175,7 +175,7 @@ def get_log(limit: int = 50, offset: int = 0, db: sqlite3.Connection = Depends(g
     return [dict(r) for r in rows]
 
 @router.delete("/log")
-def clear_log(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def clear_log(db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     db.execute("DELETE FROM notification_log")
     db.commit()
     return {"cleared": True}

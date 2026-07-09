@@ -24,7 +24,7 @@ The full system — backend, frontend, and AI — runs as a single systemd servi
 - Tailscale remote access with in-app setup
 - USB/SD card external storage management
 - OTA updates from GitHub (stable releases or main branch)
-- Change admin password from the UI
+- Multi-user accounts with roles (admin / operator / viewer)
 
 ---
 
@@ -38,6 +38,7 @@ The full system — backend, frontend, and AI — runs as a single systemd servi
 | [AI Detection](AI-Detection) | All 6 models, confidence thresholds, open-vocab classes |
 | [Face Recognition](Face-Recognition) | Enabling, the auto-built face library, assigning names |
 | [Notifications](Notifications) | ntfy, Twilio SMS, SMTP email, contacts, rules |
+| [Users](Users) | Roles, managing accounts, changing your password |
 | [Remote Access](Remote-Access) | Tailscale setup, connect, node sharing |
 | [Storage](Storage) | Internal vs external, mounting, formatting, purging |
 | [OTA Updates](OTA-Updates) | Update channels, manual check, auto-update |

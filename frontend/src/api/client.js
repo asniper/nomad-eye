@@ -3,13 +3,45 @@ import axios from 'axios'
 const api = axios.create({ baseURL: '/api' })
 
 api.interceptors.request.use(cfg => {
-  const stored = localStorage.getItem('nomadeye_auth')
-  if (stored) cfg.headers['Authorization'] = `Basic ${stored}`
+  const token = localStorage.getItem('nomadeye_auth')
+  if (token) cfg.headers['Authorization'] = `Bearer ${token}`
   return cfg
 })
 
+// A 401 on most endpoints means the session token is missing/expired/revoked — drop it
+// and force back to the login screen. But login/change-password are expected to 401 on
+// a plain wrong-password user error, not a revoked session — let those bubble up so the
+// calling form can show its own inline error instead of getting logged out mid-typo.
+const AUTH_ERROR_IS_USER_INPUT = ['/auth/login', '/auth/change-password']
+
+api.interceptors.response.use(
+  res => res,
+  err => {
+    const url = err?.config?.url || ''
+    const isUserInputAuthCall = AUTH_ERROR_IS_USER_INPUT.some(p => url.startsWith(p))
+    if (err?.response?.status === 401 && !isUserInputAuthCall) {
+      localStorage.removeItem('nomadeye_auth')
+      localStorage.removeItem('nomadeye_user')
+      if (window.location.pathname !== '/setup') {
+        window.location.href = '/'
+      }
+    }
+    return Promise.reject(err)
+  }
+)
+
 export const auth = {
   login: (username, password) => api.post('/auth/login', { username, password }),
+  logout: () => api.post('/auth/logout'),
+  me: () => api.get('/auth/me'),
+  changePassword: (currentPassword, newPassword) =>
+    api.post('/auth/change-password', { current_password: currentPassword, new_password: newPassword }),
+  users: {
+    list: () => api.get('/auth/users'),
+    create: (username, password, role) => api.post('/auth/users', { username, password, role }),
+    update: (id, body) => api.patch(`/auth/users/${id}`, body),
+    remove: (id) => api.delete(`/auth/users/${id}`),
+  },
 }
 
 export const cameras = {
@@ -92,7 +124,6 @@ export const system = {
   updateStatus: () => api.get('/system/update-status'),
   update: () => api.post('/system/update'),
   saveUpdateSettings: (data) => api.post('/system/update-settings', data),
-  changePassword: (current_password, new_password) => api.post('/system/change-password', { current_password, new_password }),
 }
 
 export const faces = {

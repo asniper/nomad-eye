@@ -15,7 +15,9 @@ Most Nomad Eye settings are managed through the web UI and stored as key-value p
 | Settings → Faces | Face recognition enable/disable, face library management |
 | Settings → Network | WiFi networks, hotspot mode, Tailscale |
 | Settings → Storage | Primary storage location, external drive management, video clip recording (enable, pre-roll, post-roll), purge old data |
-| Settings → System | Timezone, admin password, OTA update channel and auto-update |
+| Settings → System | Timezone, OTA update channel and auto-update |
+| Settings → Users | Add/remove users, change roles, reset passwords (admin only) — see [Users](Users) |
+| Account menu (sidebar) | Change your own password — available to every role |
 | Notifications | Contacts, notification rules, delivery log |
 
 ---
@@ -32,7 +34,7 @@ sqlite3 /opt/nomad-eye/data/db/nomadeye.db "SELECT key, value FROM app_config;"
 
 | Key | Description |
 |---|---|
-| `admin_password` | Admin password, stored as plaintext (set via Settings → System → Change Password) |
+| `admin_password`, `admin_username` | Legacy — no longer read for login. Kept only as one-time seed data for the `users` table on upgrade; see [Users](Users). Actual accounts live in the `users` table (hashed passwords), not `app_config`. |
 | `detection_model` | Active AI model (e.g. `yolov8n`, `yolov8s-worldv2`) |
 | `confidence_people` | Detection confidence threshold for people (0.0–1.0) |
 | `confidence_vehicles` | Detection confidence threshold for vehicles |
@@ -69,6 +71,8 @@ sqlite3 /opt/nomad-eye/data/db/nomadeye.db "SELECT key, value FROM app_config;"
 | `presence_timeout` | Minutes without a ping before switching to away status (default `5`) |
 | `presence_home_status` | Status to set when a watched device is detected (default `home`) |
 | `presence_away_status` | Status to set when no watched device is detected (default `away`) |
+
+User accounts and login sessions are **not** in `app_config` — they live in their own `users` and `sessions` tables in the same database. See [Users](Users).
 
 ---
 

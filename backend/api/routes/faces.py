@@ -2,7 +2,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from api.routes.auth import require_auth
+from api.routes.auth import require_auth, require_operator
 
 router = APIRouter()
 
@@ -40,7 +40,7 @@ def get_face_image(face_id: int, _=Depends(require_auth)):
 
 
 @router.patch("/{face_id}")
-def rename_face(face_id: int, body: RenameBody, _=Depends(require_auth)):
+def rename_face(face_id: int, body: RenameBody, _=Depends(require_operator)):
     if _pipeline is None:
         raise HTTPException(503)
     ok = _pipeline._face_recognizer.rename_face(face_id, body.name)
@@ -50,7 +50,7 @@ def rename_face(face_id: int, body: RenameBody, _=Depends(require_auth)):
 
 
 @router.delete("/unknown")
-def delete_unknown_faces(_=Depends(require_auth)):
+def delete_unknown_faces(_=Depends(require_operator)):
     if _pipeline is None:
         return {"deleted": 0}
     count = _pipeline._face_recognizer.delete_unknown_faces()
@@ -58,7 +58,7 @@ def delete_unknown_faces(_=Depends(require_auth)):
 
 
 @router.delete("/{face_id}")
-def delete_face(face_id: int, _=Depends(require_auth)):
+def delete_face(face_id: int, _=Depends(require_operator)):
     if _pipeline is None:
         raise HTTPException(503)
     ok = _pipeline._face_recognizer.delete_face(face_id)
@@ -68,7 +68,7 @@ def delete_face(face_id: int, _=Depends(require_auth)):
 
 
 @router.post("/capture")
-def capture_face_from_camera(camera_id: int, name: str = "Unknown", _=Depends(require_auth)):
+def capture_face_from_camera(camera_id: int, name: str = "Unknown", _=Depends(require_operator)):
     """Grab the latest frame from a camera and add any detected face to known faces."""
     if _pipeline is None:
         raise HTTPException(503, "Pipeline not running")
@@ -85,7 +85,7 @@ def capture_face_from_camera(camera_id: int, name: str = "Unknown", _=Depends(re
 
 
 @router.post("/{face_id}/disassociate")
-def disassociate_face(face_id: int, _=Depends(require_auth)):
+def disassociate_face(face_id: int, _=Depends(require_operator)):
     if _pipeline is None:
         raise HTTPException(503)
     ok = _pipeline._face_recognizer.rename_face(face_id, 'Unknown')
@@ -95,7 +95,7 @@ def disassociate_face(face_id: int, _=Depends(require_auth)):
 
 
 @router.post("/{face_id}/merge-into/{target_id}")
-def merge_face_into(face_id: int, target_id: int, _=Depends(require_auth)):
+def merge_face_into(face_id: int, target_id: int, _=Depends(require_operator)):
     if _pipeline is None:
         raise HTTPException(503)
     faces = _pipeline._face_recognizer.list_faces()

@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from models.database import get_db
-from api.routes.auth import require_auth
+from api.routes.auth import require_admin
 from config.settings import get_settings
 from storage.manager import (
     list_external_devices, mount_device, unmount_device,
@@ -31,7 +31,7 @@ def _clips_primary_device() -> str | None:
 
 
 @router.get("/devices")
-def get_devices(_=Depends(require_auth)):
+def get_devices(_=Depends(require_admin)):
     devices = list_external_devices()
     primary = _primary_device()
     clips_primary = _clips_primary_device()
@@ -42,7 +42,7 @@ def get_devices(_=Depends(require_auth)):
 
 
 @router.post("/devices/{device_name}/mount")
-def mount(device_name: str, _=Depends(require_auth)):
+def mount(device_name: str, _=Depends(require_admin)):
     if not _valid_device_name(device_name):
         raise HTTPException(status_code=400, detail="Invalid device name")
     ok, msg = mount_device(device_name)
@@ -52,7 +52,7 @@ def mount(device_name: str, _=Depends(require_auth)):
 
 
 @router.post("/devices/{device_name}/unmount")
-def unmount(device_name: str, _=Depends(require_auth)):
+def unmount(device_name: str, _=Depends(require_admin)):
     if not _valid_device_name(device_name):
         raise HTTPException(status_code=400, detail="Invalid device name")
     db = sqlite3.connect(cfg.db_path)
@@ -69,7 +69,7 @@ def unmount(device_name: str, _=Depends(require_auth)):
 
 
 @router.post("/devices/{device_name}/format")
-def format_dev(device_name: str, _=Depends(require_auth)):
+def format_dev(device_name: str, _=Depends(require_admin)):
     if not _valid_device_name(device_name):
         raise HTTPException(status_code=400, detail="Invalid device name")
     db = sqlite3.connect(cfg.db_path)
@@ -86,7 +86,7 @@ def format_dev(device_name: str, _=Depends(require_auth)):
 
 
 @router.post("/devices/{device_name}/set-primary")
-def set_primary(device_name: str, _=Depends(require_auth)):
+def set_primary(device_name: str, _=Depends(require_admin)):
     if not _valid_device_name(device_name):
         raise HTTPException(status_code=400, detail="Invalid device name")
     mp = _get_mount_point(device_name)
@@ -103,7 +103,7 @@ def set_primary(device_name: str, _=Depends(require_auth)):
 
 
 @router.post("/devices/{device_name}/set-clips-primary")
-def set_clips_primary(device_name: str, _=Depends(require_auth)):
+def set_clips_primary(device_name: str, _=Depends(require_admin)):
     if not _valid_device_name(device_name):
         raise HTTPException(status_code=400, detail="Invalid device name")
     mp = _get_mount_point(device_name)
@@ -120,7 +120,7 @@ def set_clips_primary(device_name: str, _=Depends(require_auth)):
 
 
 @router.post("/set-primary-internal")
-def set_primary_internal(_=Depends(require_auth)):
+def set_primary_internal(_=Depends(require_admin)):
     db = sqlite3.connect(cfg.db_path)
     db.execute("DELETE FROM app_config WHERE key='storage_primary_device'")
     db.commit()
@@ -129,7 +129,7 @@ def set_primary_internal(_=Depends(require_auth)):
 
 
 @router.get("/status")
-def storage_status(_=Depends(require_auth)):
+def storage_status(_=Depends(require_admin)):
     active_dir = get_active_images_dir()
     primary = _primary_device()
     try:
@@ -152,7 +152,7 @@ def storage_status(_=Depends(require_auth)):
 
 
 @router.get("/browse")
-def browse_files(_=Depends(require_auth)):
+def browse_files(_=Depends(require_admin)):
     active_dir = Path(get_active_images_dir())
     if not active_dir.exists():
         return {"files": [], "total_bytes": 0}

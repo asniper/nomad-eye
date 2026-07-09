@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from models.database import get_db
-from api.routes.auth import require_auth
+from api.routes.auth import require_auth, require_operator
 from config.settings import get_settings
 from storage.manager import get_active_images_dir, get_active_clips_dir
 import sqlite3
@@ -153,7 +153,7 @@ class PurgeBody(BaseModel):
 
 
 @router.delete("/purge")
-def purge_detections(body: PurgeBody, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def purge_detections(body: PurgeBody, db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     # Collect image paths targeted by this purge
     if body.category == "all":
         targeted = db.execute("SELECT DISTINCT image_path FROM detections WHERE image_path IS NOT NULL").fetchall()
@@ -209,7 +209,7 @@ def purge_detections(body: PurgeBody, db: sqlite3.Connection = Depends(get_db), 
 
 
 @router.delete("/events/{event_id}")
-def delete_event(event_id: str, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def delete_event(event_id: str, db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     targeted = db.execute(
         "SELECT DISTINCT image_path FROM detections WHERE event_id = ? AND image_path IS NOT NULL",
         (event_id,)
@@ -276,7 +276,7 @@ def get_clips_storage(db: sqlite3.Connection = Depends(get_db), _=Depends(requir
 
 
 @router.delete("/clips")
-def purge_all_clips(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def purge_all_clips(db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     rows = db.execute("SELECT clip_path FROM event_clips").fetchall()
     db.execute("DELETE FROM event_clips")
     db.commit()
@@ -305,7 +305,7 @@ def get_clip(event_id: str, db: sqlite3.Connection = Depends(get_db), _=Depends(
 
 
 @router.delete("/events/{event_id}/clip")
-def delete_clip(event_id: str, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def delete_clip(event_id: str, db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     row = db.execute(
         "SELECT clip_path FROM event_clips WHERE event_id = ?", (event_id,)
     ).fetchone()

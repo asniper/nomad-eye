@@ -4,10 +4,10 @@ import json
 import os
 import sqlite3
 import cv2
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
-from api.routes.auth import require_auth
+from api.routes.auth import require_auth, require_operator, validate_session_token
 from camera.capture import CameraCapture
 from detection.detector import CATEGORY_COLORS_BGR
 from models.database import get_db
@@ -270,7 +270,7 @@ def list_cameras(db: sqlite3.Connection = Depends(get_db), _=Depends(require_aut
 
 
 @router.post("/refresh")
-async def refresh_cameras(db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+async def refresh_cameras(db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
     await scan_and_refresh(db)
     return _build_camera_list(db)
 
@@ -280,7 +280,7 @@ async def set_camera_enabled(
     camera_id: int,
     enabled: bool,
     db: sqlite3.Connection = Depends(get_db),
-    _=Depends(require_auth),
+    _=Depends(require_operator),
 ):
     db.execute("UPDATE cameras SET enabled=? WHERE camera_id=?", (1 if enabled else 0, camera_id))
     db.commit()
@@ -314,7 +314,7 @@ def set_camera_name(
     camera_id: int,
     body: CameraNameBody,
     db: sqlite3.Connection = Depends(get_db),
-    _=Depends(require_auth),
+    _=Depends(require_operator),
 ):
     db.execute("UPDATE cameras SET name=? WHERE camera_id=?", (body.name.strip(), camera_id))
     db.commit()
@@ -322,7 +322,7 @@ def set_camera_name(
 
 
 @router.delete("/{camera_id}")
-def remove_camera(camera_id: int, _=Depends(require_auth)):
+def remove_camera(camera_id: int, _=Depends(require_operator)):
     """Remove a camera from the active pipeline (keeps DB record and events)."""
     if _pipeline is None:
         return {"ok": False}
@@ -341,7 +341,7 @@ def remove_camera(camera_id: int, _=Depends(require_auth)):
 def delete_camera_permanently(
     camera_id: int,
     db: sqlite3.Connection = Depends(get_db),
-    _=Depends(require_auth),
+    _=Depends(require_operator),
 ):
     """Permanently delete a camera and all its detection events and images."""
     if _pipeline is not None:
@@ -372,7 +372,7 @@ def delete_camera_permanently(
 
 
 @router.post("/{camera_id}/reload")
-async def reload_camera(camera_id: int, _=Depends(require_auth)):
+async def reload_camera(camera_id: int, _=Depends(require_operator)):
     if _pipeline is None:
         return {"ok": False}
     loop = asyncio.get_event_loop()
@@ -381,7 +381,7 @@ async def reload_camera(camera_id: int, _=Depends(require_auth)):
 
 
 @router.post("/{camera_id}/reset-tracking")
-def reset_tracking(camera_id: int, _=Depends(require_auth)):
+def reset_tracking(camera_id: int, _=Depends(require_operator)):
     if _pipeline:
         _pipeline.reset_tracking(camera_id)
     return {"ok": True}
@@ -392,7 +392,7 @@ def set_face_settings(
     camera_id: int,
     body: FaceSettingsBody,
     db: sqlite3.Connection = Depends(get_db),
-    _=Depends(require_auth),
+    _=Depends(require_operator),
 ):
     if body.face_detection_enabled is not None:
         db.execute("UPDATE cameras SET face_detection_enabled=? WHERE camera_id=?",
@@ -421,7 +421,7 @@ def set_face_settings(
 
 
 @router.post("/{camera_id}/overlay")
-def toggle_overlay(camera_id: int, enabled: bool, _=Depends(require_auth)):
+def toggle_overlay(camera_id: int, enabled: bool, _=Depends(require_operator)):
     if _pipeline:
         _pipeline.set_overlay(camera_id, enabled)
     return {"camera_id": camera_id, "overlay": enabled}
@@ -463,7 +463,7 @@ def set_camera_adjustments(
     camera_id: int,
     body: AdjustmentsBody,
     db: sqlite3.Connection = Depends(get_db),
-    _=Depends(require_auth),
+    _=Depends(require_operator),
 ):
     db.execute(
         "UPDATE cameras SET hw_adjustments=?, sw_brightness=?, sw_contrast=? WHERE camera_id=?",
@@ -482,7 +482,7 @@ def set_night_mode(
     camera_id: int,
     body: dict,
     db: sqlite3.Connection = Depends(get_db),
-    _=Depends(require_auth),
+    _=Depends(require_operator),
 ):
     mode = body.get('mode', 'off')
     if mode not in ('off', 'on', 'auto'):
@@ -499,7 +499,22 @@ def set_night_mode(
 
 
 @router.websocket("/{camera_id}/stream")
-async def stream(websocket: WebSocket, camera_id: int):
+async def stream(
+    websocket: WebSocket,
+    camera_id: int,
+    token: str = Query(default=''),
+    db: sqlite3.Connection = Depends(get_db),
+):
+    # Browsers can't set an Authorization header on a WebSocket handshake, so the
+    # session token travels as a query param instead and is checked the same way.
+    # get_db() (not a one-off connection) matches every other route's WAL/busy_timeout
+    # setup, and FastAPI runs sync Depends() callables in a threadpool even for an
+    # async route, so this doesn't block the event loop during the handshake.
+    user = validate_session_token(db, token)
+    if not user:
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     if _pipeline is None:
         await websocket.close()

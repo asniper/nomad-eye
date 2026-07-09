@@ -8,7 +8,7 @@ from networking.manager import (
     start_access_point, stop_access_point, get_current_ip, is_connected, nmcli,
     _terse_split, get_network_status
 )
-from api.routes.auth import require_auth
+from api.routes.auth import require_admin
 from storage.manager import STORAGE_HELPER
 
 
@@ -58,19 +58,19 @@ def _get_hostname() -> str:
 
 
 @router.get("/")
-def network_status(_=Depends(require_auth)):
+def network_status(_=Depends(require_admin)):
     status = get_network_status()
     status["hostname"] = _get_hostname()
     return status
 
 
 @router.get("/known")
-def known_networks(_=Depends(require_auth)):
+def known_networks(_=Depends(require_admin)):
     return get_known_networks()
 
 
 @router.delete("/known/{ssid}")
-def delete_network(ssid: str, _=Depends(require_auth)):
+def delete_network(ssid: str, _=Depends(require_admin)):
     import subprocess
     result = subprocess.run(
         ["/usr/bin/nmcli", "con", "delete", ssid],
@@ -83,7 +83,7 @@ def delete_network(ssid: str, _=Depends(require_auth)):
 
 
 @router.post("/connect")
-async def connect(body: ConnectRequest, background_tasks: BackgroundTasks, _=Depends(require_auth)):
+async def connect(body: ConnectRequest, background_tasks: BackgroundTasks, _=Depends(require_admin)):
     """Kick off a WiFi connection attempt and return immediately.
     The client should poll GET /api/network/ to detect when it connects."""
     background_tasks.add_task(connect_to_network, body.ssid, body.password)
@@ -91,20 +91,20 @@ async def connect(body: ConnectRequest, background_tasks: BackgroundTasks, _=Dep
 
 
 @router.post("/connect-saved")
-async def connect_saved(body: SavedConnectRequest, background_tasks: BackgroundTasks, _=Depends(require_auth)):
+async def connect_saved(body: SavedConnectRequest, background_tasks: BackgroundTasks, _=Depends(require_admin)):
     """Re-activate a saved NetworkManager profile (no password needed)."""
     background_tasks.add_task(connect_saved_network, body.ssid)
     return {"status": "connecting", "ssid": body.ssid}
 
 
 @router.post("/add")
-def add_network(body: AddNetworkRequest, _=Depends(require_auth)):
+def add_network(body: AddNetworkRequest, _=Depends(require_admin)):
     save_network(body.ssid, body.password)
     return {"saved": True}
 
 
 @router.get("/scan")
-def scan(_=Depends(require_auth)):
+def scan(_=Depends(require_admin)):
     # Trigger a fresh scan; ignore errors (e.g. already scanning, rate-limited)
     try:
         nmcli("dev", "wifi", "rescan")
@@ -135,7 +135,7 @@ def scan(_=Depends(require_auth)):
 
 
 @router.post("/ap/start")
-def ap_start(_=Depends(require_auth)):
+def ap_start(_=Depends(require_admin)):
     try:
         start_access_point()
     except Exception as e:
@@ -144,13 +144,13 @@ def ap_start(_=Depends(require_auth)):
 
 
 @router.post("/ap/stop")
-def ap_stop(_=Depends(require_auth)):
+def ap_stop(_=Depends(require_admin)):
     stop_access_point()
     return {"ap": "stopped", "active": _is_ap_active()}
 
 
 @router.post("/tailscale/auth-url")
-def tailscale_auth_url(_=Depends(require_auth)):
+def tailscale_auth_url(_=Depends(require_admin)):
     import re
     try:
         result = subprocess.run(
@@ -189,7 +189,7 @@ class TailscaleUpRequest(BaseModel):
 
 
 @router.post("/tailscale/up")
-def tailscale_up(body: TailscaleUpRequest, _=Depends(require_auth)):
+def tailscale_up(body: TailscaleUpRequest, _=Depends(require_admin)):
     cmd = ['tailscale', 'up', '--accept-routes']
     if body.auth_key.strip():
         cmd.append(f'--authkey={body.auth_key.strip()}')
@@ -209,7 +209,7 @@ def tailscale_up(body: TailscaleUpRequest, _=Depends(require_auth)):
 
 
 @router.post("/tailscale/down")
-def tailscale_down(_=Depends(require_auth)):
+def tailscale_down(_=Depends(require_admin)):
     try:
         result = subprocess.run(['tailscale', 'down'], capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
@@ -220,7 +220,7 @@ def tailscale_down(_=Depends(require_auth)):
 
 
 @router.post("/tailscale/logout")
-def tailscale_logout(_=Depends(require_auth)):
+def tailscale_logout(_=Depends(require_admin)):
     try:
         result = subprocess.run(['tailscale', 'logout'], capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
@@ -231,7 +231,7 @@ def tailscale_logout(_=Depends(require_auth)):
 
 
 @router.get("/tailscale")
-def tailscale_status(_=Depends(require_auth)):
+def tailscale_status(_=Depends(require_admin)):
     try:
         r = subprocess.run(['tailscale', 'status', '--json'],
                            capture_output=True, text=True, timeout=5)
