@@ -9,9 +9,9 @@ Most Nomad Eye settings are managed through the web UI and stored as key-value p
 | Location | What you can configure |
 |---|---|
 | Settings → Detection | AI model, confidence thresholds, motion threshold/scale, detection interval, per-category enable, per-camera settings |
-| Settings → General | Device status, SMS/email/ntfy channel credentials (Twilio, SMTP, ntfy server) |
-| Settings → General → Presence Detection | Network presence scanning, watched devices, away timeout, status mapping |
-| Settings → General → Notification Links | How links in notifications point back to the device (local IP / device name / Tailscale IP) |
+| Settings → Monitoring | Device status, presence detection, camera health alerts |
+| Settings → Monitoring → Presence Detection | Network presence scanning, watched devices, away timeout, status mapping |
+| Notifications page | SMS/email/ntfy channel credentials (Twilio, SMTP, ntfy server), notification link mode — plus contacts and rules |
 | Settings → Faces | Face recognition enable/disable, face library management |
 | Settings → Network | WiFi networks, hotspot mode, Tailscale |
 | Settings → Storage | Primary storage location, external drive management, video clip recording (enable, pre-roll, post-roll), purge old data |

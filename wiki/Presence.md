@@ -14,7 +14,7 @@ This is purely network-based — it requires the tracked device to be connected 
 
 ## Setup
 
-**Settings → General → Presence Detection**
+**Settings → Monitoring → Presence Detection**
 
 1. Enable the toggle.
 2. Set your **away timeout** — how many minutes without a ping before switching to Away. 5 minutes is a good default; use 2 for faster response.
@@ -78,7 +78,7 @@ See [Notifications](Notifications.md) for rule setup.
 - The service runs as the `nomadeye` user — `arp-scan` requires root and is called via the `storage-helper.sh` sudo wrapper. Check that the wrapper is in place: `ls -la /opt/nomad-eye/storage-helper.sh`
 
 **Status not changing**
-- Confirm presence detection is enabled in Settings → General.
+- Confirm presence detection is enabled in Settings → Monitoring.
 - Check that your watched device is on the same Wi-Fi network as the Nomad Eye device.
 - Verify the MAC address matches what shows in the scan.
 

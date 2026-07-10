@@ -64,7 +64,7 @@ This requires **HTTPS Certificates** to be turned on for your tailnet — check 
 
 Notification messages (ntfy, SMS, and email alike) include a link back to the detection event. For remote access links to work from anywhere, point that link at your Tailscale address:
 
-**Settings → General → Notification Links**
+**Notifications page → Notification Links**
 
 Set the link mode to **Tailscale IP** — Nomad Eye auto-detects the device's current Tailscale address (via `tailscale ip -4`) each time a notification is sent, so there's nothing to type in manually. The other modes are **Local IP** (LAN-only) and **Device Name** (a hostname you set yourself).
 

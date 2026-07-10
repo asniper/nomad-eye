@@ -1,6 +1,8 @@
 import { useEffect, useCallback, useState } from 'react'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
+import NotificationSettings from '../components/NotificationSettings'
+import { useAuth } from '../hooks/useAuth'
 import { notifications, settings as settingsApi } from '../api/client'
 import { formatDateTime } from '../utils/dates'
 
@@ -361,6 +363,8 @@ function NotificationLog() {
 }
 
 export default function Notifications() {
+  const { user } = useAuth()
+  const isAdmin = (user?.role ?? 'viewer') === 'admin'
   const [contacts, setContacts] = useState([])
   const [rules, setRules] = useState([])
   const [loading, setLoading] = useState(true)
@@ -445,6 +449,10 @@ export default function Notifications() {
       {error && (
         <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3">{error}</p>
       )}
+
+      {/* Transport/provider config (SMS/Email/ntfy/link mode) — admin only.
+          Relocated here from Settings so all notification setup lives together. */}
+      {isAdmin && <NotificationSettings />}
 
       <Card title="Contacts">
         {contacts.length === 0 && !addingContact && (

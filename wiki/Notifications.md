@@ -14,13 +14,13 @@ Nomad Eye can send push notifications via ntfy, SMS via Twilio or carrier email 
 2. Subscribe to a topic name you choose (e.g., `nomad-eye-alerts-abc123`)
    - Use a random-enough topic name — anyone who knows the topic can read it on the free tier
    - For private topics, use an access token (see below)
-3. In Nomad Eye, go to **Settings → ntfy Push Notifications** and verify the server URL (`https://ntfy.sh` by default)
+3. In Nomad Eye, go to the **Notifications** page → **ntfy Push Notifications** and verify the server URL (`https://ntfy.sh` by default)
 4. Go to **Notifications → Contacts → Add Contact**, choose type **ntfy**, and enter your topic name
 5. Add a notification rule for that contact
 
 That's it. No account, no API key, no monthly fee.
 
-### Settings → ntfy Push Notifications
+### Notifications → ntfy Push Notifications
 
 | Field | Description |
 |---|---|
@@ -32,7 +32,7 @@ That's it. No account, no API key, no monthly fee.
 To use a private topic on ntfy.sh:
 1. Create a free account at [ntfy.sh](https://ntfy.sh)
 2. Generate an access token in your account settings
-3. Enter the token in **Settings → ntfy Push Notifications → Access Token**
+3. Enter the token in **Notifications → ntfy Push Notifications → Access Token**
 4. Subscribe to the topic in the ntfy app using your account
 
 ### Priority levels
@@ -50,7 +50,7 @@ Nomad Eye automatically sets the ntfy notification priority based on what was de
 
 You need a Twilio account with an SMS-capable phone number. Note: Twilio requires A2P 10DLC campaign registration for US numbers, which adds setup overhead.
 
-**In Nomad Eye:** Settings → SMS → Provider: Twilio
+**In Nomad Eye:** Notifications → SMS → Provider: Twilio
 
 | Field | Where to find it |
 |---|---|
@@ -64,7 +64,7 @@ You need a Twilio account with an SMS-capable phone number. Note: Twilio require
 
 Send SMS via your carrier's free email-to-SMS gateway. No API key required — uses your existing SMTP configuration.
 
-**In Nomad Eye:** Settings → SMS → Provider: Email Gateway
+**In Nomad Eye:** Notifications → SMS → Provider: Email Gateway
 
 When creating an SMS contact, select the recipient's carrier. Nomad Eye will format the address as `number@carrier-gateway.com`.
 
@@ -79,7 +79,7 @@ When creating an SMS contact, select the recipient's carrier. Nomad Eye will for
 | US Cellular | `email.uscc.net` |
 | Metro by T-Mobile | `mymetropcs.com` |
 
-Requires SMTP to be configured (Settings → Email).
+Requires SMTP to be configured (Notifications → Email).
 
 ---
 
@@ -87,7 +87,7 @@ Requires SMTP to be configured (Settings → Email).
 
 Any SMTP server works — Gmail, Outlook, or self-hosted.
 
-**In Nomad Eye:** Settings → Email (SMTP)
+**In Nomad Eye:** Notifications → Email (SMTP)
 
 | Field | Description |
 |---|---|
@@ -140,11 +140,11 @@ Each notification includes:
 - Camera name
 - Detection label and confidence
 - Timestamp
-- A direct link to the detection event in the web UI (controlled by Settings → General → Notification Links — set the link mode to Tailscale IP so this link works from anywhere, see [Remote Access](Remote-Access))
+- A direct link to the detection event in the web UI (controlled by Notifications → Notification Links — set the link mode to Tailscale IP so this link works from anywhere, see [Remote Access](Remote-Access))
 
 ntfy notifications also set a **priority** (high for people/faces, default for everything else) and a **click action** that opens the event directly.
 
-**Camera health alerts** (Settings → Detection → Camera health alerts, off by default) are a separate, simpler kind of notification — no detection, no image, no rule matching. They go to every active contact when a camera goes offline for 90+ seconds and again when it recovers. See [Camera Setup → Camera Health Alerts](Camera-Setup#camera-health-alerts).
+**Camera health alerts** (Settings → Monitoring → Camera health alerts, off by default) are a separate, simpler kind of notification — no detection, no image, no rule matching. They go to every active contact when a camera goes offline for 90+ seconds and again when it recovers. See [Camera Setup → Camera Health Alerts](Camera-Setup#camera-health-alerts).
 
 ---
 
