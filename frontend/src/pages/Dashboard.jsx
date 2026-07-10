@@ -2,9 +2,24 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
-import { cameras, detections, notifications, settings as settingsApi } from '../api/client'
+import { cameras, detections, notifications, settings as settingsApi, faces as facesApi } from '../api/client'
 import { useDeviceStatus } from '../context/DeviceStatusContext'
-import { formatDateTime, formatTime } from '../utils/dates'
+import { formatDateTime } from '../utils/dates'
+
+const MODEL_NAMES = {
+  'yolov8n': 'YOLOv8 Nano', 'yolov8s': 'YOLOv8 Small', 'yolov8m': 'YOLOv8 Medium',
+  'yolov8s-worldv2': 'YOLOWorld', 'megadetector': 'MegaDetector',
+  'owlv2': 'OWLv2', 'grounding-dino': 'Grounding DINO',
+}
+
+const SEGMENT_MINUTES = 5  // continuous segments are fixed 5-minute files
+
+function formatDuration(mins) {
+  if (!mins) return '0m'
+  if (mins < 60) return `${mins}m`
+  const h = Math.floor(mins / 60)
+  return `${h}h ${mins % 60}m`
+}
 
 const CATEGORY_STYLE = {
   people:   { background: 'rgba(239,68,68,0.15)',   color: '#F87171' },
@@ -40,6 +55,19 @@ function CopyButton({ text }) {
     <button onClick={copy} className="text-xs transition-colors shrink-0 px-2 py-1.5" style={{ color: copied ? '#4ADE80' : '#6B7280' }}>
       {copied ? 'Copied ✓' : 'Copy'}
     </button>
+  )
+}
+
+function FeatureRow({ label, on, detail }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-sm text-gray-400">{label}</span>
+      <span className="flex items-center gap-1.5 shrink-0">
+        {detail && <span className="text-xs text-gray-500">{detail}</span>}
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: on ? '#4ADE80' : '#4B5563' }} />
+        <span className="text-xs" style={{ color: on ? '#4ADE80' : '#6B7280' }}>{on ? 'On' : 'Off'}</span>
+      </span>
+    </div>
   )
 }
 
@@ -93,6 +121,10 @@ export default function Dashboard() {
   const [rules, setRules] = useState([])
   const [lastNotif, setLastNotif] = useState(null)
   const [externalUrl, setExternalUrl] = useState('')
+  const [appConfig, setAppConfig] = useState(null)
+  const [clipStore, setClipStore] = useState(null)
+  const [contStore, setContStore] = useState(null)
+  const [faceList, setFaceList] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -105,10 +137,14 @@ export default function Dashboard() {
       }).catch(() => {}),
       detections.list({ limit: 15 }).then(r => setRecent(r.data)).catch(() => {}),
       detections.storage().then(r => setStorage(r.data)).catch(() => {}),
+      detections.clipsStorage().then(r => setClipStore(r.data)).catch(() => {}),
+      detections.continuousStorage().then(r => setContStore(r.data)).catch(() => {}),
       notifications.listContacts().then(r => setContacts(r.data)).catch(() => {}),
       notifications.listRules().then(r => setRules(r.data)).catch(() => {}),
       notifications.log({ limit: 1 }).then(r => setLastNotif(r.data[0] ?? null)).catch(() => {}),
-      settingsApi.getAll().then(r => setExternalUrl(r.data?.external_url ?? '')).catch(() => {}),
+      facesApi.list().then(r => setFaceList(r.data)).catch(() => {}),
+      // Admin-only; viewers get nothing and the config-dependent cards just hide.
+      settingsApi.getAll().then(r => { setAppConfig(r.data || {}); setExternalUrl(r.data?.external_url ?? '') }).catch(() => {}),
     ]).finally(() => setLoading(false))
   }, [])
 
@@ -120,6 +156,22 @@ export default function Dashboard() {
   const activeRules = rules.filter(r => r.active).length
   const byCategory = storage?.by_category ?? {}
   const totalDetections = storage?.total_detections ?? 0
+
+  const clipCount = clipStore?.clip_count ?? 0
+  const clipBytes = clipStore?.clip_bytes ?? 0
+  const segCount = contStore?.segment_count ?? 0
+  const segBytes = contStore?.segment_bytes ?? 0
+  const videoBytes = clipBytes + segBytes
+  const hasVideo = clipStore != null || contStore != null
+
+  const namedFaces = faceList ? new Set(faceList.filter(f => f.name && f.name !== 'Unknown').map(f => f.name)).size : 0
+  const unknownFaces = faceList ? faceList.filter(f => !f.name || f.name === 'Unknown').length : 0
+
+  // appConfig is admin-only; when present, drive the feature-status card from it.
+  const cfg = appConfig || {}
+  const hasConfig = appConfig != null && Object.keys(cfg).length > 0
+  const modelKey = cfg.detection_model || cfg.yolo_model || ''
+  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
 
   return (
     <div className="space-y-6">
@@ -175,15 +227,12 @@ export default function Dashboard() {
         </Card>
 
         <Card>
-          <p className="text-3xl font-bold text-white">{activeRules}</p>
-          <p className="text-sm text-gray-400 mt-1">Active Rules</p>
-          <p className="text-xs text-gray-500 mt-1">{activeContacts} active contact{activeContacts !== 1 ? 's' : ''}</p>
-          {lastNotif ? (
-            <p className="text-xs text-gray-600 mt-1">Last sent {formatTime(lastNotif.timestamp)}</p>
-          ) : (
-            <p className="text-xs text-gray-600 mt-1">No notifications yet</p>
-          )}
-          <Link to="/notifications" className="text-xs mt-2 block hover:text-white transition-colors" style={{ color: '#FFB800' }}>Manage →</Link>
+          <p className="text-3xl font-bold text-white">{formatBytes(videoBytes)}</p>
+          <p className="text-sm text-gray-400 mt-1">Video Recorded</p>
+          <p className="text-xs text-gray-500 mt-1">
+            {hasVideo ? `${clipCount} clip${clipCount !== 1 ? 's' : ''} · ${segCount} segment${segCount !== 1 ? 's' : ''}` : '—'}
+          </p>
+          <Link to="/cameras" className="text-xs mt-2 block hover:text-white transition-colors" style={{ color: '#FFB800' }}>Browse recordings →</Link>
         </Card>
       </div>
 
@@ -242,6 +291,68 @@ export default function Dashboard() {
             ))}
             <Link to="/cameras" className="text-xs mt-3 block hover:text-white transition-colors" style={{ color: '#FFB800' }}>View live feeds →</Link>
           </Card>
+
+          <Card title="Recording">
+            {!hasVideo ? (
+              <p className="text-xs text-gray-600">No recordings yet.</p>
+            ) : (
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-400">Event clips</span>
+                  <span className="text-sm text-white">{clipCount.toLocaleString()} <span className="text-gray-600">· {formatBytes(clipBytes)}</span></span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-400">Continuous</span>
+                  <span className="text-sm text-white">
+                    {segCount.toLocaleString()} seg <span className="text-gray-600">· {formatBytes(segBytes)}</span>
+                  </span>
+                </div>
+                {segCount > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-400">Footage retained</span>
+                    <span className="text-sm text-white">≈{formatDuration(segCount * SEGMENT_MINUTES)}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between pt-2.5 border-t border-[#3A3A3A]">
+                  <span className="text-sm text-gray-400">Total video</span>
+                  <span className="text-sm font-medium text-white">{formatBytes(videoBytes)}</span>
+                </div>
+              </div>
+            )}
+            <Link to="/cameras" className="text-xs mt-3 block hover:text-white transition-colors" style={{ color: '#FFB800' }}>Browse recordings →</Link>
+          </Card>
+
+          {(namedFaces > 0 || unknownFaces > 0) && (
+            <Card title="Faces">
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-400">Known people</span>
+                  <span className="text-sm text-white">{namedFaces}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-400">Unrecognized captures</span>
+                  <span className="text-sm text-white">{unknownFaces}</span>
+                </div>
+              </div>
+              <Link to="/settings?tab=faces" className="text-xs mt-3 block hover:text-white transition-colors" style={{ color: '#FFB800' }}>Manage faces →</Link>
+            </Card>
+          )}
+
+          {hasConfig && (
+            <Card title="AI & Features">
+              <div className="space-y-2.5">
+                <FeatureRow label="AI detection" on={cfg.ai_enabled !== '0'}
+                  detail={modelKey ? (MODEL_NAMES[modelKey] || modelKey) : null} />
+                <FeatureRow label="Detection zones" on={cfg.zones_enabled === '1'} />
+                <FeatureRow label="Event clips" on={cfg.clips_enabled === '1'} />
+                <FeatureRow label="Continuous recording" on={cfg.continuous_recording_enabled === '1'} />
+                <FeatureRow label="Camera health alerts" on={cfg.camera_health_alerts_enabled === '1'} />
+                <FeatureRow label="Presence detection" on={cfg.presence_enabled === '1'} />
+                <FeatureRow label="Secure (HTTPS)" on={isHttps} />
+              </div>
+              <Link to="/settings" className="text-xs mt-3 block hover:text-white transition-colors" style={{ color: '#FFB800' }}>Settings →</Link>
+            </Card>
+          )}
 
           <Card title="Notifications">
             <div className="space-y-2.5">
