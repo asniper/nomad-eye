@@ -4,11 +4,21 @@ from config.settings import get_settings
 
 cfg = get_settings()
 
+# synchronous=NORMAL under WAL is the SQLite-recommended pairing: durable across
+# an app crash, only at risk of losing the last transaction on an OS crash / power
+# loss (never corruption). On a flash-storage SBC that turns a full fsync per commit
+# into far fewer, cutting write latency and card wear — worth it for a recorder.
+def _tune(db):
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA synchronous=NORMAL")
+    db.execute("PRAGMA busy_timeout=10000")
+    db.execute("PRAGMA cache_size=-8000")   # ~8 MB page cache (negative = KiB)
+    db.execute("PRAGMA mmap_size=67108864") # 64 MB mmap, modest for a ~2 GB box
+
 def get_db():
     db = sqlite3.connect(cfg.db_path, timeout=15, check_same_thread=False)
     db.row_factory = sqlite3.Row
-    db.execute("PRAGMA journal_mode=WAL")
-    db.execute("PRAGMA busy_timeout=10000")
+    _tune(db)
     try:
         yield db
     finally:
@@ -17,6 +27,10 @@ def get_db():
 def init_db():
     Path(cfg.db_path).parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(cfg.db_path)
+    # Flip the DB into WAL at boot (persists in the file header) rather than
+    # waiting for the first HTTP request — all the background writers that run
+    # before/without any request then get WAL too.
+    _tune(db)
     cursor = db.cursor()
     cursor.executescript("""
         CREATE TABLE IF NOT EXISTS detections (
@@ -163,6 +177,15 @@ def init_db():
         pass
     try:
         db.execute("CREATE INDEX IF NOT EXISTS idx_detections_event_conf ON detections (event_id, confidence DESC)")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass
+    try:
+        # detections is the fastest-growing table; the history API filters by
+        # camera_id and orders by timestamp DESC. Without these it full-scans +
+        # sorts the whole table on every page load.
+        db.execute("CREATE INDEX IF NOT EXISTS idx_detections_ts ON detections (timestamp DESC)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_detections_camera_ts ON detections (camera_id, timestamp DESC)")
         db.commit()
     except sqlite3.OperationalError:
         pass

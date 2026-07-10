@@ -654,12 +654,18 @@ async def stream(
 
     reader = asyncio.create_task(read_client())
     last_debug_send = 0.0
+    last_frame_ts = None
     try:
         while True:
             if not cam.is_alive():
                 break
             frame_obj = cam.get_frame()
-            if frame_obj is not None:
+            # The loop wakes ~30x/s but capture only produces new frames at the
+            # camera fps (~15). Without this dedupe we'd copy + redraw + re-encode
+            # the identical frame ~2x, doubling per-viewer JPEG-encode CPU for
+            # nothing — the client already has that exact frame.
+            if frame_obj is not None and frame_obj.timestamp != last_frame_ts:
+                last_frame_ts = frame_obj.timestamp
                 frame = frame_obj.data.copy()
                 if _pipeline._overlay_enabled.get(camera_id):
                     detections = _pipeline.get_latest(camera_id) or []

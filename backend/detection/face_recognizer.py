@@ -8,11 +8,24 @@ from typing import List, Optional
 from datetime import datetime, timezone
 from config.settings import get_settings
 
+import importlib.util
+
+# `face_recognition` pulls dlib — tens of MB resident. Face detection is off by
+# default, so detect whether the library is *available* cheaply (no import) and
+# defer the actual heavy import to the first real face call via _get_fr(). A
+# default install (faces off) then never loads dlib at all.
 try:
-    import face_recognition as _fr
-    _HAS_FR = True
-except ImportError:
+    _HAS_FR = importlib.util.find_spec('face_recognition') is not None
+except Exception:
     _HAS_FR = False
+_fr = None
+
+def _get_fr():
+    global _fr
+    if _fr is None:
+        import face_recognition as _mod
+        _fr = _mod
+    return _fr
 
 _MATCH_THRESHOLD_FR   = 0.55   # L2 distance: lower = stricter (face_recognition lib)
 _MATCH_THRESHOLD_HIST = 0.82   # cosine similarity: higher = stricter (OpenCV fallback)
@@ -42,7 +55,16 @@ class FaceRecognizer:
         self._lock = threading.Lock()
         self._known: list = []  # [(face_id, name, encoding_ndarray, image_path)]
         self._min_confidence: float = 0.0
+        self._cascade = None
+        # find_spec says face_recognition is present, but its native dlib can
+        # still fail to load at real import time. If that happens we fall back
+        # to the opencv haar path per-frame — this flag latches that decision.
+        self._fr_broken = False
         if not _HAS_FR:
+            self._ensure_cascade()
+
+    def _ensure_cascade(self):
+        if self._cascade is None:
             cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
             self._cascade = cv2.CascadeClassifier(cascade_path)
         self._reload_from_db()
@@ -99,7 +121,19 @@ class FaceRecognizer:
             else:
                 small = frame
 
-            results = self._detect_fr(small, sensitivity) if _HAS_FR else self._detect_opencv(small)
+            if _HAS_FR and not self._fr_broken:
+                try:
+                    results = self._detect_fr(small, sensitivity)
+                except ImportError:
+                    # dlib present on disk but failed to load — latch the haar
+                    # fallback so we degrade gracefully instead of losing face
+                    # detection entirely (matches the pre-lazy-import behavior).
+                    self._fr_broken = True
+                    self._ensure_cascade()
+                    results = self._detect_opencv(small)
+            else:
+                self._ensure_cascade()
+                results = self._detect_opencv(small)
 
             if scale < 1.0:
                 from detection.detector import Detection
@@ -162,18 +196,19 @@ class FaceRecognizer:
     # ------------------------------------------------------------------
     def _detect_fr(self, frame: np.ndarray, sensitivity: str = 'normal') -> list:
         from detection.detector import Detection
+        fr = _get_fr()
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         if sensitivity == 'fast':
-            locations = _fr.face_locations(rgb, number_of_times_to_upsample=1, model='hog')
+            locations = fr.face_locations(rgb, number_of_times_to_upsample=1, model='hog')
         elif sensitivity == 'thorough':
-            locations = _fr.face_locations(rgb, number_of_times_to_upsample=2, model='hog')
+            locations = fr.face_locations(rgb, number_of_times_to_upsample=2, model='hog')
         else:  # 'normal': upsample=1 with 1.5x upscale fallback
-            locations = _fr.face_locations(rgb, number_of_times_to_upsample=1, model='hog')
+            locations = fr.face_locations(rgb, number_of_times_to_upsample=1, model='hog')
             if not locations:
                 h, w = rgb.shape[:2]
                 rgb_big = cv2.resize(rgb, (int(w * 1.5), int(h * 1.5)))
-                locs_big = _fr.face_locations(rgb_big, number_of_times_to_upsample=1, model='hog')
+                locs_big = fr.face_locations(rgb_big, number_of_times_to_upsample=1, model='hog')
                 if locs_big:
                     inv = 1 / 1.5
                     locations = [(max(0, int(t * inv)), max(0, int(r * inv)),
@@ -182,7 +217,7 @@ class FaceRecognizer:
 
         if not locations:
             return []
-        encodings = _fr.face_encodings(rgb, locations)
+        encodings = fr.face_encodings(rgb, locations)
         results = []
         for (top, right, bottom, left), enc in zip(locations, encodings):
             w = right - left
@@ -204,7 +239,7 @@ class FaceRecognizer:
         if not known:
             return 'Unknown', None, 1.0  # face found; no known faces to compare against
         known_encs = [e for _, _, e, _ in known]
-        distances = _fr.face_distance(known_encs, encoding)
+        distances = _get_fr().face_distance(known_encs, encoding)
         best = int(np.argmin(distances))
         d = float(distances[best])
         if d < _MATCH_THRESHOLD_FR:
@@ -430,10 +465,17 @@ class FaceRecognizer:
 
     def add_face_from_frame(self, frame: np.ndarray, name: str) -> Optional[int]:
         """Extract the largest detected face from a frame and save it with a name."""
-        if _HAS_FR:
+        use_fr = _HAS_FR and not self._fr_broken
+        if use_fr:
+            try:
+                fr = _get_fr()
+            except ImportError:
+                self._fr_broken = True
+                use_fr = False
+        if use_fr:
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            locations = _fr.face_locations(rgb, model='hog')
-            encodings = _fr.face_encodings(rgb, locations)
+            locations = fr.face_locations(rgb, model='hog')
+            encodings = fr.face_encodings(rgb, locations)
             if not encodings:
                 return None
             best = max(range(len(locations)),
@@ -442,6 +484,7 @@ class FaceRecognizer:
             enc_bytes = encodings[best].astype(np.float64).tobytes()
             bbox = (left, top, right, bottom)
         else:
+            self._ensure_cascade()
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             faces = self._cascade.detectMultiScale(
                 gray, scaleFactor=1.1, minNeighbors=5,
@@ -472,4 +515,4 @@ class FaceRecognizer:
 
     @property
     def backend(self) -> str:
-        return 'face_recognition' if _HAS_FR else 'opencv_haar'
+        return 'face_recognition' if (_HAS_FR and not self._fr_broken) else 'opencv_haar'
