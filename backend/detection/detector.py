@@ -3,7 +3,6 @@ import cv2
 import numpy as np
 from dataclasses import dataclass
 from typing import List
-from ultralytics import YOLO
 from config.settings import get_settings
 
 cfg = get_settings()
@@ -196,6 +195,11 @@ def _models_dir() -> str:
 
 class ObjectDetector:
     def __init__(self, model_name: str = "yolov8n.pt", confidences: dict = None):
+        # ultralytics pulls in torch (hundreds of MB). Import it here rather than
+        # at module top so merely importing this module — for CATEGORY_COLORS_BGR,
+        # MODELS, create_detector, etc. — doesn't load torch. It's loaded only when
+        # a detector is actually constructed (i.e. AI detection is really needed).
+        from ultralytics import YOLO
         self._model = YOLO(_resolve_model(model_name))
         default = cfg.detection_confidence
         self._confidences = {c: confidences.get(c, default) if confidences else default
@@ -207,6 +211,7 @@ class ObjectDetector:
             pass
 
     def reload(self, model_name: str):
+        from ultralytics import YOLO
         self._model = YOLO(_resolve_model(model_name))
 
     def set_category_confidence(self, category: str, value: float):

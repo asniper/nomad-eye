@@ -164,12 +164,14 @@ class DetectionPipeline:
         _model_key = model_name.removesuffix('.pt') if model_name.endswith('.pt') else model_name
         self._detection_model_key: str = _model_key
         self._detection_classes: list = classes
-        try:
-            self._object_detector = create_detector(_model_key, classes=classes, confidences=confidences)
-        except Exception:
-            _model_key = 'yolov8n'
-            self._detection_model_key = _model_key
-            self._object_detector = ObjectDetector('yolov8n.pt', confidences=confidences)
+        # The object detector loads YOLO weights + torch (hundreds of MB). Build
+        # it lazily on first actual use (_ensure_detector) instead of at boot, so
+        # motion-only recording (AI off) and faces-only mode never pay that RAM.
+        # Confidences set before the detector exists are stashed here and applied
+        # when it's finally built.
+        self._object_detector = None
+        self._pending_confidences: dict = dict(confidences) if confidences else {}
+        self._detector_lock = threading.Lock()
         self._face_recognizer = FaceRecognizer()
         self._running = False
         self._threads: list[threading.Thread] = []
@@ -244,15 +246,40 @@ class DetectionPipeline:
             next_id = max((c.camera_id for c in self._cameras), default=-1) + 1
         return existing_paths, next_id
 
+    def _ensure_detector(self):
+        """Build the object detector on first real use (loads YOLO/torch), caching
+        it. Returns None if construction fails outright. Serialized so two camera
+        threads hitting their first inference at once don't both build one."""
+        det = self._object_detector
+        if det is not None:
+            return det
+        with self._detector_lock:
+            if self._object_detector is not None:
+                return self._object_detector
+            confs = dict(self._pending_confidences) or None
+            try:
+                det = create_detector(self._detection_model_key, classes=self._detection_classes, confidences=confs)
+            except Exception:
+                try:
+                    det = ObjectDetector('yolov8n.pt', confidences=confs)
+                    self._detection_model_key = 'yolov8n'
+                except Exception:
+                    return None
+            self._object_detector = det
+            return det
+
     def reload_model(self, model_key: str, classes: list = None):
-        """Hot-swap the detection model. Creates the new model first, then swaps under lock."""
+        """Hot-swap the detection model. Serialized against the lazy build under
+        _detector_lock so the two can't construct two models (2x transient RAM) at once."""
         key = model_key.removesuffix('.pt') if model_key.endswith('.pt') else model_key
-        with self._lock:
-            existing_confidences = dict(self._object_detector._confidences)
-        new_detector = create_detector(key, classes=classes, confidences=existing_confidences)
-        self._detection_model_key = key
-        self._detection_classes = classes
-        with self._lock:
+        with self._detector_lock:
+            # Carry confidences over from the live detector if one exists, else
+            # from whatever was stashed before a lazy build happened.
+            existing = self._object_detector
+            existing_confidences = dict(existing._confidences) if existing is not None else dict(self._pending_confidences)
+            new_detector = create_detector(key, classes=classes, confidences=existing_confidences)
+            self._detection_model_key = key
+            self._detection_classes = classes
             self._object_detector = new_detector
 
     def reload_faces(self):
@@ -657,8 +684,12 @@ class DetectionPipeline:
             self._enabled_categories.discard(category)
 
     def set_category_confidence(self, category: str, value: float):
+        # Remember it so a not-yet-built (lazy) detector picks it up on construction,
+        # and apply it live if the detector already exists.
+        self._pending_confidences[category] = value
         with self._lock:
-            self._object_detector.set_category_confidence(category, value)
+            if self._object_detector is not None:
+                self._object_detector.set_category_confidence(category, value)
 
     def set_motion_threshold(self, value: int):
         self._motion_threshold = value
@@ -932,7 +963,6 @@ class DetectionPipeline:
                 if now > cooldown and self._ai_enabled:
                     t0 = time.time()
                     with self._lock:
-                        detector = self._object_detector
                         face_rec = self._face_recognizer
 
                     faces_enabled = ('faces' in self._enabled_categories and
@@ -985,7 +1015,12 @@ class DetectionPipeline:
                     if faces_only:
                         all_detections, timed_out = [], False
                     else:
-                        all_detections, timed_out = _detect_with_timeout(detector, frame)
+                        # Build the YOLO detector on first real need (loads torch).
+                        detector = self._ensure_detector()
+                        if detector is None:
+                            all_detections, timed_out = [], True
+                        else:
+                            all_detections, timed_out = _detect_with_timeout(detector, frame)
                         # Collect face results (should finish long before YOLO)
                         if faces_enabled:
                             face_done.wait(timeout=3.0)
@@ -1063,9 +1098,8 @@ class DetectionPipeline:
                     self._last_periodic_scan[cam.camera_id] = now
                     yolo_categories = self._enabled_categories - {'faces'}
                     if yolo_categories:
-                        with self._lock:
-                            detector = self._object_detector
-                        all_detections, timed_out = _detect_with_timeout(detector, frame)
+                        detector = self._ensure_detector()
+                        all_detections, timed_out = _detect_with_timeout(detector, frame) if detector is not None else ([], True)
                         if not timed_out:
                             # Vehicles excluded: parked car in still scene shouldn't create events.
                             filtered = [d for d in all_detections
