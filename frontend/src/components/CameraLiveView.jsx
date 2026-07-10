@@ -89,7 +89,7 @@ function DebugPanel({ info }) {
 // only need to happen once. `children` renders into the same button row as
 // the controls below (e.g. navigation links to other panels), so callers can
 // extend the row without this component knowing about them.
-export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, playback, onGoLive, children }) {
+export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, playback, onGoLive, onPlaybackEnded, children }) {
   const imgRef = useRef(null)
   const wsRef = useRef(null)
   const lastFrameUrlRef = useRef(null)
@@ -366,6 +366,7 @@ export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, p
                 controls
                 autoPlay
                 playsInline
+                onEnded={onPlaybackEnded}
                 className="w-full h-full object-contain"
               />
             ) : (

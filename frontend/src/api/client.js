@@ -81,6 +81,8 @@ export const detections = {
     api.get('/detections/continuous', { params: { camera_id: cameraId, date, tz } }),
   continuousSummary: (cameraId) =>
     api.get('/detections/continuous/summary', { params: { camera_id: cameraId } }),
+  listLockedContinuous: (cameraId) =>
+    api.get('/detections/continuous/locked', { params: { camera_id: cameraId } }),
   continuousVideo: (segmentId) => api.get(`/detections/continuous/${segmentId}/video`, { responseType: 'blob' }),
   deleteContinuous: (segmentId) => api.delete(`/detections/continuous/${segmentId}`),
   lockContinuous: (segmentId, locked) => api.post(`/detections/continuous/${segmentId}/lock`, { locked }),

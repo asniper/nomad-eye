@@ -404,6 +404,23 @@ def continuous_summary(camera_id: int = Query(...), db: sqlite3.Connection = Dep
     }
 
 
+@router.get("/continuous/locked")
+def list_locked_continuous_segments(
+    camera_id: int = Query(...),
+    db: sqlite3.Connection = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """All locked segments for a camera, regardless of day — locking is meant to
+    survive across the day-by-day timeline, so finding one shouldn't require
+    paging back through calendar days to spot it."""
+    rows = db.execute(
+        "SELECT id, camera_id, started_at, locked FROM continuous_segments "
+        "WHERE camera_id=? AND locked=1 ORDER BY started_at DESC LIMIT 200",
+        (camera_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 class LockBody(BaseModel):
     locked: bool
 
