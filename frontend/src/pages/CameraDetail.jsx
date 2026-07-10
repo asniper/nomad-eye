@@ -558,12 +558,13 @@ function safeTz(tz) {
 
 const SEGMENT_MINUTES = 5
 
-// The actual <video> lives in the shared CameraLiveView display at the top of
-// the page (so playing a recording and going back live both happen in one
-// place) — this tab owns the day/segment list and the lock/download/delete
-// actions, and drives that shared player via the selectedSegment/onSelect
-// props lifted up to CameraDetail.
-function ContinuousTab({ camId, selectedSegment, videoUrl, videoLoading, onSelectSegment, onGoLive, onSegmentDeleted, onSegmentLockChanged, advanceRef }) {
+// The actual <video> and the segment action bar (Prev/Next/Lock/Download/
+// Delete) live in CameraDetail, right under the shared player — this tab
+// just owns the day/segment list and the Locked Recordings list, and reports
+// what "next"/"prev" mean via advanceRef/prevRef/onNavChange, and reacts to
+// lock/delete outcomes via syncRef so its own lists stay in sync regardless
+// of which component actually issued the request.
+function ContinuousTab({ camId, selectedSegment, onSelectSegment, onGoLive, onNavChange, advanceRef, prevRef, syncRef }) {
   const tz = safeTz(getTimezone())
   const [summary, setSummary] = useState(null)
   const [lockedSegments, setLockedSegments] = useState([])
@@ -577,16 +578,11 @@ function ContinuousTab({ camId, selectedSegment, videoUrl, videoLoading, onSelec
   const [segments, setSegments] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [lockBusy, setLockBusy] = useState(false)
-  const [deleteBusy, setDeleteBusy] = useState(false)
   const [nowMinutes, setNowMinutes] = useState(() => localMinutesOfDay(new Date().toISOString(), tz))
   const isMountRef = useRef(true)
   const lockedRequestRef = useRef(0)
   const dayRequestRef = useRef(0)
 
-  const selected = selectedSegment
-    ? segments.find(s => s.id === selectedSegment.id) || selectedSegment
-    : null
   const isToday = dateStr === todayStr(tz)
 
   const segmentsWithMinutes = useMemo(
@@ -598,7 +594,7 @@ function ContinuousTab({ camId, selectedSegment, videoUrl, videoLoading, onSelec
   // loaded day's list — a segment selected from the Locked Recordings section
   // below (which can be from any day) won't be found here, and next/prev
   // simply have nothing to offer for it, same as the disabled-button state.
-  const selectedIndex = selected ? segmentsWithMinutes.findIndex(s => s.id === selected.id) : -1
+  const selectedIndex = selectedSegment ? segmentsWithMinutes.findIndex(s => s.id === selectedSegment.id) : -1
   const nextSegment = selectedIndex >= 0 ? segmentsWithMinutes[selectedIndex + 1] || null : null
   const prevSegment = selectedIndex > 0 ? segmentsWithMinutes[selectedIndex - 1] : null
 
@@ -617,8 +613,28 @@ function ContinuousTab({ camId, selectedSegment, videoUrl, videoLoading, onSelec
 
   useEffect(() => {
     advanceRef.current = nextSegment ? () => onSelectSegment(nextSegment, { scrollIntoView: false }) : null
-    return () => { advanceRef.current = null }
-  }, [nextSegment, onSelectSegment, advanceRef])
+    prevRef.current = prevSegment ? () => onSelectSegment(prevSegment, { scrollIntoView: false }) : null
+    return () => { advanceRef.current = null; prevRef.current = null }
+  }, [nextSegment, prevSegment, onSelectSegment, advanceRef, prevRef])
+
+  useEffect(() => {
+    onNavChange({ hasNext: !!nextSegment, hasPrev: !!prevSegment, nextSegmentId: nextSegment?.id ?? null })
+  }, [nextSegment, prevSegment, onNavChange])
+
+  useEffect(() => {
+    syncRef.current = {
+      onLockChanged: (id, locked) => {
+        setSegments(prev => prev.map(s => s.id === id ? { ...s, locked } : s))
+        loadLocked()
+      },
+      onDeleted: (id) => {
+        setSegments(prev => prev.filter(s => s.id !== id))
+        detectionsApi.continuousSummary(camId).then(r => setSummary(r.data)).catch(() => {})
+        loadLocked()
+      },
+    }
+    return () => { syncRef.current = null }
+  }, [camId, loadLocked, syncRef])
 
   useEffect(() => {
     if (!isToday) return
@@ -657,54 +673,6 @@ function ContinuousTab({ camId, selectedSegment, videoUrl, videoLoading, onSelec
     if (!isMountRef.current) onGoLive()
     isMountRef.current = false
   }, [loadDay]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const toggleLock = async () => {
-    if (!selected) return
-    setLockBusy(true)
-    const next = !selected.locked
-    try {
-      await detectionsApi.lockContinuous(selected.id, next)
-      setSegments(prev => prev.map(s => s.id === selected.id ? { ...s, locked: next } : s))
-      onSegmentLockChanged(selected.id, next)
-      loadLocked()
-    } catch {
-      setError('Failed to update lock.')
-    } finally {
-      setLockBusy(false)
-    }
-  }
-
-  const downloadSegment = () => {
-    if (!videoUrl || !selected) return
-    const a = document.createElement('a')
-    a.href = videoUrl
-    a.download = `continuous-cam${camId}-${selected.id}.mp4`
-    a.click()
-  }
-
-  const goToNext = () => { if (nextSegment) onSelectSegment(nextSegment) }
-  const goToPrev = () => { if (prevSegment) onSelectSegment(prevSegment) }
-
-  const deleteSegment = async () => {
-    if (!selected) return
-    const msg = selected.locked
-      ? 'This recording is locked. Delete it anyway?'
-      : 'Delete this recording?'
-    if (!window.confirm(msg)) return
-    setDeleteBusy(true)
-    try {
-      const deletedId = selected.id
-      await detectionsApi.deleteContinuous(deletedId)
-      setSegments(prev => prev.filter(s => s.id !== deletedId))
-      onSegmentDeleted(deletedId)
-      detectionsApi.continuousSummary(camId).then(r => setSummary(r.data)).catch(() => {})
-      loadLocked()
-    } catch {
-      setError('Failed to delete recording.')
-    } finally {
-      setDeleteBusy(false)
-    }
-  }
 
   const oldestDateStr = summary?.oldest_started_at
     ? new Date(summary.oldest_started_at).toLocaleDateString('en-CA', { timeZone: tz })
@@ -803,66 +771,6 @@ function ContinuousTab({ camId, selectedSegment, videoUrl, videoLoading, onSelec
         </div>
       </Card>
 
-      {selected && (
-        <Card>
-          <p className="text-xs text-gray-500 mb-3">▲ Now playing in the viewer above</p>
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-2">
-              <p className="text-sm text-white font-medium">{formatDateTime(selected.started_at)}</p>
-              {selected.locked && (
-                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(147,197,253,0.15)', color: '#93C5FD' }}>
-                  Locked
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={goToPrev}
-                disabled={!prevSegment}
-                title="Previous recording"
-                className="text-xs px-2.5 py-1 rounded transition-colors hover:opacity-80 disabled:opacity-30"
-                style={{ background: '#3A3A3A', color: '#9CA3AF' }}
-              >
-                ‹ Prev
-              </button>
-              <button
-                onClick={goToNext}
-                disabled={!nextSegment}
-                title="Next recording"
-                className="text-xs px-2.5 py-1 rounded transition-colors hover:opacity-80 disabled:opacity-30"
-                style={{ background: '#3A3A3A', color: '#9CA3AF' }}
-              >
-                Next ›
-              </button>
-              <button
-                onClick={toggleLock}
-                disabled={lockBusy}
-                className="text-xs px-2.5 py-1 rounded transition-colors hover:opacity-80 disabled:opacity-40"
-                style={{ background: '#3A3A3A', color: selected.locked ? '#93C5FD' : '#9CA3AF' }}
-              >
-                {selected.locked ? 'Unlock' : 'Lock'}
-              </button>
-              <button
-                onClick={downloadSegment}
-                disabled={!videoUrl}
-                className="text-xs px-2.5 py-1 rounded transition-colors hover:opacity-80 disabled:opacity-40"
-                style={{ background: '#3A3A3A', color: '#9CA3AF' }}
-              >
-                Download
-              </button>
-              <button
-                onClick={deleteSegment}
-                disabled={deleteBusy}
-                className="text-xs px-2.5 py-1 rounded transition-colors hover:opacity-80 disabled:opacity-40"
-                style={{ background: '#3A3A3A', color: '#EF4444' }}
-              >
-                {deleteBusy ? 'Deleting…' : 'Delete'}
-              </button>
-            </div>
-          </div>
-        </Card>
-      )}
-
       <Card>
         <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Locked Recordings</p>
         {lockedSegments.length === 0 ? (
@@ -920,17 +828,51 @@ export default function CameraDetail() {
   const [selectedSegment, setSelectedSegment] = useState(null)
   const [videoUrl, setVideoUrl] = useState(null)
   const [videoLoading, setVideoLoading] = useState(false)
+  const [lockBusy, setLockBusy] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const [nav, setNav] = useState({ hasNext: false, hasPrev: false, nextSegmentId: null })
   const videoUrlRef = useRef(null)
   const selectRequestRef = useRef(0)
   const videoCardRef = useRef(null)
   const selectedSegmentRef = useRef(null)
   useEffect(() => { selectedSegmentRef.current = selectedSegment }, [selectedSegment])
   // ContinuousTab owns the segment list (day-scoped), so it's the one that
-  // knows what "next" means — it keeps this pointed at the right advance
-  // function; CameraDetail just calls it when the shared player reports the
-  // video ended.
+  // knows what "next"/"prev" mean — it keeps these pointed at the right
+  // functions, and `nav` (above) mirrors just enough of that (booleans + the
+  // next id, for prefetching) to drive the button bar and auto-advance here.
   const advanceRef = useRef(null)
+  const prevRef = useRef(null)
+  // ContinuousTab also reacts to lock/delete through this, so its own
+  // day-scoped list and Locked Recordings list stay in sync no matter which
+  // component actually issued the request.
+  const syncRef = useRef(null)
   const handlePlaybackEnded = useCallback(() => { advanceRef.current?.() }, [])
+
+  // Prefetches the video for whatever segment is currently "next," so
+  // auto-advance and the Next button don't have to wait on a network
+  // round-trip at the exact moment they're used — the whole point of
+  // buffering ahead. Keyed by id, not by object identity, since `nav` is
+  // recomputed (new object) on basically every render.
+  const prefetchRef = useRef({ id: null, promise: null, url: null })
+  useEffect(() => {
+    const id = nav.nextSegmentId
+    const prev = prefetchRef.current
+    if (prev.id === id) return
+    // Guard against revoking a URL that selectSegment has (or is about to)
+    // adopt as the live video. Without this check, turning over from B (once
+    // "next" moves past it) races selectSegment's own consumption of that
+    // same shared promise whenever B's fetch is still in flight at the exact
+    // moment it gets selected — both attach a .then() to the same promise,
+    // and this one otherwise has no way to know the other one just won.
+    if (prev.id != null) prev.promise.then(u => { if (u && u !== videoUrlRef.current) URL.revokeObjectURL(u) }).catch(() => {})
+    if (!id) { prefetchRef.current = { id: null, promise: null, url: null }; return }
+    const entry = { id, promise: null, url: null }
+    entry.promise = detectionsApi.continuousVideo(id)
+      .then(r => { const u = URL.createObjectURL(r.data); entry.url = u; return u })
+      .catch(() => null)
+    prefetchRef.current = entry
+  }, [nav.nextSegmentId])
 
   const reload = useCallback(() => {
     return cameras.list().then(r => {
@@ -955,35 +897,18 @@ export default function CameraDetail() {
     setVideoUrl(null)
   }, [])
 
-  // Delete only clears playback if the deleted segment is still the active
-  // selection at the moment the delete actually resolves — the user may have
-  // picked a different segment while the delete request was in flight, and
-  // that newer selection must survive.
-  const handleSegmentDeleted = useCallback((deletedId) => {
-    if (selectedSegmentRef.current?.id === deletedId) goLive()
-  }, [goLive])
-
-  // ContinuousTab derives its displayed `selected.locked` from its own
-  // day-scoped `segments` list, falling back to this `selectedSegment` prop
-  // when the segment isn't in that list (e.g. one picked from the cross-day
-  // Locked Recordings section). Toggling lock on such a segment only ever
-  // patched that local `segments` list — which doesn't contain it — so the
-  // fallback object here needs to be patched too, or the "Locked" badge and
-  // Lock/Unlock button never reflect the change.
-  const handleSegmentLockChanged = useCallback((id, locked) => {
-    setSelectedSegment(prev => prev && prev.id === id ? { ...prev, locked } : prev)
-  }, [])
-
   // This component doesn't remount across /cameras/:id navigation (same route,
   // just a changed param), so playback state from the previous camera has to
   // be explicitly cleared rather than relying on fresh initial state.
   useEffect(() => { goLive() }, [cameraId, goLive])
 
-  useEffect(() => () => { if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current) }, [])
+  useEffect(() => () => {
+    if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current)
+    if (prefetchRef.current.promise) prefetchRef.current.promise.then(u => { if (u) URL.revokeObjectURL(u) }).catch(() => {})
+  }, [])
 
   const selectSegment = useCallback(async (seg, { scrollIntoView = true } = {}) => {
     setSelectedSegment(seg)
-    setVideoLoading(true)
     setVideoUrl(null)
     // Skip this for auto-advance (video ended naturally) — the user is
     // already looking at the player, so yanking scroll position back to it
@@ -991,21 +916,83 @@ export default function CameraDetail() {
     // selections (timeline, locked list, Next/Prev) still snap to it.
     if (scrollIntoView) videoCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     const requestId = ++selectRequestRef.current
+
+    // If this is the segment we were already buffering ahead of time (the
+    // common case for auto-advance and Next, since it's queued the moment it
+    // becomes "next"), reuse that instead of firing a second, redundant
+    // request — and skip the loading flash entirely if it already finished.
+    const cached = prefetchRef.current.id === seg.id ? prefetchRef.current : null
+    setVideoLoading(!cached?.url)
     try {
-      const r = await detectionsApi.continuousVideo(seg.id)
+      const url = cached ? await cached.promise : await detectionsApi.continuousVideo(seg.id).then(r => URL.createObjectURL(r.data))
       // Clicking a second segment before the first's fetch resolves must not let
-      // the stale response overwrite the newer selection's video.
-      if (requestId !== selectRequestRef.current) return
-      const url = URL.createObjectURL(r.data)
+      // the stale response overwrite the newer selection's video. A cached
+      // (prefetched) URL is shared with whichever call actually wins — e.g.
+      // two clicks on the same still-loading segment both await the same
+      // promise — so a losing call must NOT revoke it here; only the fetch it
+      // exclusively owns (the non-cached path) is safe to clean up itself.
+      // The shared one's lifecycle is the prefetch effect's job.
+      if (requestId !== selectRequestRef.current) { if (url && !cached) URL.revokeObjectURL(url); return }
+      if (!url) throw new Error('load failed')
       if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current)
       videoUrlRef.current = url
       setVideoUrl(url)
+      if (cached) prefetchRef.current = { id: null, promise: null, url: null } // consumed
     } catch {
       // playback.url stays null — CameraLiveView renders the "failed to load" state
     } finally {
       if (requestId === selectRequestRef.current) setVideoLoading(false)
     }
   }, [])
+
+  const toggleLock = useCallback(async () => {
+    const seg = selectedSegment
+    if (!seg) return
+    setLockBusy(true)
+    setActionError('')
+    const next = !seg.locked
+    try {
+      await detectionsApi.lockContinuous(seg.id, next)
+      // Only apply if still the active selection — the user may have picked
+      // something else while this request was in flight.
+      if (selectedSegmentRef.current?.id === seg.id) {
+        setSelectedSegment(prev => prev ? { ...prev, locked: next } : prev)
+      }
+      syncRef.current?.onLockChanged(seg.id, next)
+    } catch {
+      setActionError('Failed to update lock.')
+    } finally {
+      setLockBusy(false)
+    }
+  }, [selectedSegment])
+
+  const deleteSegment = useCallback(async () => {
+    const seg = selectedSegment
+    if (!seg) return
+    const msg = seg.locked
+      ? 'This recording is locked. Delete it anyway?'
+      : 'Delete this recording?'
+    if (!window.confirm(msg)) return
+    setDeleteBusy(true)
+    setActionError('')
+    try {
+      await detectionsApi.deleteContinuous(seg.id)
+      syncRef.current?.onDeleted(seg.id)
+      if (selectedSegmentRef.current?.id === seg.id) goLive()
+    } catch {
+      setActionError('Failed to delete recording.')
+    } finally {
+      setDeleteBusy(false)
+    }
+  }, [selectedSegment, goLive])
+
+  const downloadSegment = () => {
+    if (!videoUrl || !selectedSegment) return
+    const a = document.createElement('a')
+    a.href = videoUrl
+    a.download = `continuous-cam${cam?.id}-${selectedSegment.id}.mp4`
+    a.click()
+  }
 
   const saveName = async () => {
     setEditingName(false)
@@ -1067,6 +1054,70 @@ export default function CameraDetail() {
         </Card>
       </div>
 
+      {/* Right under the video, not below the timeline — this is the whole
+          point of lifting it up here: it needs to be usable while actually
+          watching, not scrolled out of view. Shown regardless of which tab
+          is active, since the player above behaves the same way. */}
+      {selectedSegment && (
+        <Card>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-white font-medium">{formatDateTime(selectedSegment.started_at)}</p>
+              {selectedSegment.locked && (
+                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(147,197,253,0.15)', color: '#93C5FD' }}>
+                  Locked
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => prevRef.current?.()}
+                disabled={!nav.hasPrev}
+                title="Previous recording"
+                className="text-xs px-2.5 py-1 rounded transition-colors hover:opacity-80 disabled:opacity-30"
+                style={{ background: '#3A3A3A', color: '#9CA3AF' }}
+              >
+                ‹ Prev
+              </button>
+              <button
+                onClick={() => advanceRef.current?.()}
+                disabled={!nav.hasNext}
+                title="Next recording"
+                className="text-xs px-2.5 py-1 rounded transition-colors hover:opacity-80 disabled:opacity-30"
+                style={{ background: '#3A3A3A', color: '#9CA3AF' }}
+              >
+                Next ›
+              </button>
+              <button
+                onClick={toggleLock}
+                disabled={lockBusy}
+                className="text-xs px-2.5 py-1 rounded transition-colors hover:opacity-80 disabled:opacity-40"
+                style={{ background: '#3A3A3A', color: selectedSegment.locked ? '#93C5FD' : '#9CA3AF' }}
+              >
+                {selectedSegment.locked ? 'Unlock' : 'Lock'}
+              </button>
+              <button
+                onClick={downloadSegment}
+                disabled={!videoUrl}
+                className="text-xs px-2.5 py-1 rounded transition-colors hover:opacity-80 disabled:opacity-40"
+                style={{ background: '#3A3A3A', color: '#9CA3AF' }}
+              >
+                Download
+              </button>
+              <button
+                onClick={deleteSegment}
+                disabled={deleteBusy}
+                className="text-xs px-2.5 py-1 rounded transition-colors hover:opacity-80 disabled:opacity-40"
+                style={{ background: '#3A3A3A', color: '#EF4444' }}
+              >
+                {deleteBusy ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+          {actionError && <p className="text-xs text-red-400 mt-2">{actionError}</p>}
+        </Card>
+      )}
+
       <div className="flex items-center gap-1.5 border-b border-[#3A3A3A] overflow-x-auto">
         {TABS.map(t => (
           <button
@@ -1091,13 +1142,12 @@ export default function CameraDetail() {
         <ContinuousTab
           camId={cam.id}
           selectedSegment={selectedSegment}
-          videoUrl={videoUrl}
-          videoLoading={videoLoading}
           onSelectSegment={selectSegment}
           onGoLive={goLive}
-          onSegmentDeleted={handleSegmentDeleted}
-          onSegmentLockChanged={handleSegmentLockChanged}
+          onNavChange={setNav}
           advanceRef={advanceRef}
+          prevRef={prevRef}
+          syncRef={syncRef}
         />
       </div>
       {tab === 'zones' && <ZoneEditor camId={cam.id} />}

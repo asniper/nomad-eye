@@ -379,7 +379,7 @@ export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, p
               className="absolute top-2 left-2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 text-white text-xs font-medium hover:bg-black/80 transition-colors"
             >
               <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
-              Live Mode
+              Go Live
             </button>
             {playback.label && (
               <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-black/50 text-white text-xs font-mono pointer-events-none select-none">
