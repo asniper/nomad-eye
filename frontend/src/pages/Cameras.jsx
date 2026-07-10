@@ -87,32 +87,11 @@ function CameraFeed({ cam, onNameSaved, onEnabledChange }) {
       </div>
 
       <CameraLiveView cam={cam} onEnabledChange={onEnabledChange} onStatusChange={setStatus}>
-        <Link to={`/cameras/${cam.id}`} className={TAB_LINK} style={{ background: '#4c6e5d', color: '#ffffff' }}
-          title="Browse continuous recordings for this camera">
-          Continuous
-        </Link>
-        <Link to={`/cameras/${cam.id}?tab=zones`} className={TAB_LINK}
-          title="Detection zones — ignore or restrict regions of the frame">
-          Zones
-        </Link>
-        <Link to={`/cameras/${cam.id}?tab=adjust`} className={TAB_LINK} title="Camera adjustments">
-          Adjust
-        </Link>
-        <Link to={`/cameras/${cam.id}?tab=face`} className={TAB_LINK} style={{ background: '#3A3A3A', color: '#A855F7' }}
-          title="Face detection settings">
-          Face
+        <Link to={`/cameras/${cam.id}`} className={TAB_LINK} style={{ background: '#FFB800', color: '#151925' }}
+          title="Continuous recording, zones, adjustments, face settings, and detection history for this camera">
+          Edit Camera
         </Link>
       </CameraLiveView>
-
-      <Link
-        to={`/cameras/${cam.id}?tab=history`}
-        className="flex items-center justify-between text-xs text-gray-500 hover:text-gray-300 transition-colors pt-1 w-full no-underline"
-      >
-        Recent Detections
-        <svg className="w-3.5 h-3.5 -rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </Link>
     </Card>
   )
 }

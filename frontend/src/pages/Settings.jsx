@@ -663,9 +663,9 @@ function PresenceCard({ allSettings, saveSetting, saving, saved }) {
                   <button
                     onClick={() => handleToggle(d.id, !d.active)}
                     className="relative shrink-0 rounded-full transition-colors"
-                    style={{ width: 34, height: 18, background: d.active ? '#FFB800' : '#484848' }}
+                    style={{ width: 40, height: 22, background: d.active ? '#FFB800' : '#484848' }}
                   >
-                    <div className="absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all" style={{ left: d.active ? 16 : 2 }} />
+                    <div className="absolute w-4 h-4 rounded-full bg-white transition-all" style={{ top: 3, left: d.active ? 20 : 3 }} />
                   </button>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-white">{d.name}</p>
@@ -750,6 +750,7 @@ function PresenceCard({ allSettings, saveSetting, saving, saved }) {
               ? <p className="text-xs text-gray-500">No devices found.</p>
               : (
                 <div className="rounded-lg overflow-hidden border border-[#3A3A3A]">
+                <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-[#3A3A3A]">
@@ -777,7 +778,7 @@ function PresenceCard({ allSettings, saveSetting, saving, saved }) {
                                 ? <span className="text-green-400">Watching</span>
                                 : <button
                                     onClick={() => addFromScan(d)}
-                                    className="text-[#FFB800] hover:opacity-80 transition-opacity"
+                                    className="text-[#FFB800] hover:opacity-80 transition-opacity px-2 py-1"
                                   >Add</button>
                               }
                             </td>
@@ -786,6 +787,7 @@ function PresenceCard({ allSettings, saveSetting, saving, saved }) {
                       })}
                     </tbody>
                   </table>
+                </div>
                 </div>
               )
           )}
@@ -852,7 +854,7 @@ function CamerasCard({ allSettings, saveSetting, saving, saved }) {
                   <p className="text-xs text-gray-700 mt-0.5">Last seen {new Date(cam.last_seen).toLocaleString()}</p>
                 )}
               </div>
-              <div className="flex items-center gap-3 shrink-0">
+              <div className="flex items-center gap-3 flex-wrap shrink-0">
                 {/* Enable/disable toggle */}
                 <button
                   disabled={togglingEnabled === cam.id}
@@ -2531,8 +2533,8 @@ function ExternalDevicesCard({ onDeviceChanged }) {
                     {mounted && !isPrimary && !isClipsPrimary && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.15)', color: '#4ADE80' }}>Mounted</span>}
                     {!mounted && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(156,163,175,0.15)', color: '#6B7280' }}>Not mounted</span>}
                   </div>
-                  {mounted && <p className="text-xs text-gray-600 font-mono mt-0.5">{dev.mountpoint}</p>}
-                  {dev.model && <p className="text-xs text-gray-600 mt-0.5">{dev.model}</p>}
+                  {mounted && <p className="text-xs text-gray-600 font-mono mt-0.5 truncate">{dev.mountpoint}</p>}
+                  {dev.model && <p className="text-xs text-gray-600 mt-0.5 truncate">{dev.model}</p>}
                 </div>
                 <div className="flex gap-2 flex-wrap shrink-0">
                   {!mounted && (
@@ -2926,12 +2928,12 @@ function ConfidenceSliders({ allSettings, onSave, saving, saved }) {
         <span className="text-xs font-medium w-16 shrink-0" style={{ color: enabled ? color : '#555' }}>{label}</span>
         <button
           onClick={() => onSave(enabledKey, enabled ? '0' : '1')}
-          className="shrink-0 relative w-8 h-4 rounded-full transition-colors"
+          className="shrink-0 relative w-9 h-5 rounded-full transition-colors"
           style={{ background: enabled ? color : '#3A3A3A' }}
           title={enabled ? 'Disable category' : 'Enable category'}
         >
           <span
-            className="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all duration-200"
+            className="absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200"
             style={enabled ? { right: '2px' } : { left: '2px' }}
           />
         </button>

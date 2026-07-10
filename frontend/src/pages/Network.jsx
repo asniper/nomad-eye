@@ -29,7 +29,7 @@ function CopyButton({ text, label = 'Copy', copiedLabel = 'Copied!' }) {
   return (
     <button
       onClick={() => navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })}
-      className="text-xs px-2 py-0.5 rounded shrink-0 transition-colors"
+      className="text-xs px-2.5 py-1.5 rounded shrink-0 transition-colors"
       style={{ background: '#3A3A3A', color: copied ? '#4ADE80' : '#9CA3AF' }}
     >
       {copied ? copiedLabel : label}
@@ -580,9 +580,9 @@ export default function Network() {
               </div>
             )}
             {netStatus?.ssid && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-400">Network</span>
-                <span className="text-sm text-white font-medium">{netStatus.ssid}</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm text-gray-400 shrink-0">Network</span>
+                <span className="text-sm text-white font-medium truncate min-w-0">{netStatus.ssid}</span>
               </div>
             )}
             {netStatus?.signal != null && (
@@ -628,19 +628,19 @@ export default function Network() {
           {known.map((n, i) => {
             const isCurrent = netStatus?.ssid === n.ssid
             return (
-              <div key={i} className="flex items-center justify-between py-2.5">
-                <div className="flex items-center gap-3">
+              <div key={i} className="flex items-center justify-between gap-2 py-2.5">
+                <div className="flex items-center gap-3 min-w-0">
                   {WIFI_ICON}
-                  <p className="text-sm font-medium text-white">{n.ssid}</p>
+                  <p className="text-sm font-medium text-white truncate">{n.ssid}</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3 shrink-0">
                   {isCurrent
                     ? <Badge label="Current" color="green" />
                     : (
                       <button
                         onClick={() => connectSaved(n.ssid)}
                         disabled={connecting}
-                        className="text-xs disabled:opacity-40 transition-colors hover:text-white"
+                        className="text-xs disabled:opacity-40 transition-colors hover:text-white px-2 py-1"
                         style={{ color: '#FFB800' }}
                       >
                         Connect
@@ -655,7 +655,7 @@ export default function Network() {
                         setKnown(k => k.filter(x => x.ssid !== n.ssid))
                       } catch {}
                     }}
-                    className="text-xs text-gray-600 hover:text-red-400 transition-colors ml-1"
+                    className="text-xs text-gray-600 hover:text-red-400 transition-colors px-2 py-1"
                   >
                     ✕
                   </button>
@@ -695,10 +695,10 @@ export default function Network() {
               {connectMsg.text}
             </span>
             {connecting && (
-              <button onClick={cancelConnect} className="text-xs text-gray-400 hover:text-white shrink-0">Cancel</button>
+              <button onClick={cancelConnect} className="text-xs text-gray-400 hover:text-white shrink-0 px-2 py-1">Cancel</button>
             )}
             {!connecting && (
-              <button onClick={() => setConnectMsg(null)} className="text-xs text-gray-400 hover:text-white shrink-0">✕</button>
+              <button onClick={() => setConnectMsg(null)} className="text-xs text-gray-400 hover:text-white shrink-0 px-2 py-1">✕</button>
             )}
           </div>
         )}
@@ -736,15 +736,15 @@ export default function Network() {
         {scanResults.length > 0 && (
           <div className="divide-y divide-[#3A3A3A]">
             {scanResults.map((n, i) => (
-              <div key={i} className="flex items-center justify-between py-2.5">
-                <div className="flex items-center gap-3">
+              <div key={i} className="flex items-center justify-between gap-2 py-2.5">
+                <div className="flex items-center gap-3 min-w-0">
                   {WIFI_ICON}
-                  <div>
-                    <p className="text-sm font-medium text-white">{n.ssid}</p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-white truncate">{n.ssid}</p>
                     {n.signal != null && <p className="text-xs text-gray-500">{n.signal}% signal</p>}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   {netStatus?.ssid === n.ssid
                     ? <Badge label="Current" color="green" />
                     : (
@@ -754,7 +754,7 @@ export default function Network() {
                           setConnectMsg(null)
                           n.saved ? connectSaved(n.ssid) : setConnectTarget(n.ssid)
                         }}
-                        className="text-xs disabled:opacity-40 transition-colors hover:text-white"
+                        className="text-xs disabled:opacity-40 transition-colors hover:text-white px-2 py-1"
                         style={{ color: '#FFB800' }}
                       >
                         {n.saved ? 'Switch' : 'Connect'}

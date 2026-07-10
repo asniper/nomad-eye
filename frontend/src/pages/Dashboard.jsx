@@ -37,7 +37,7 @@ function CopyButton({ text }) {
     }).catch(() => {})
   }
   return (
-    <button onClick={copy} className="text-xs transition-colors shrink-0" style={{ color: copied ? '#4ADE80' : '#6B7280' }}>
+    <button onClick={copy} className="text-xs transition-colors shrink-0 px-2 py-1.5" style={{ color: copied ? '#4ADE80' : '#6B7280' }}>
       {copied ? 'Copied ✓' : 'Copy'}
     </button>
   )
@@ -50,10 +50,10 @@ function UrlRow({ label, url, isLink }) {
       <div className="flex items-center gap-2">
         {isLink ? (
           <a href={url} target="_blank" rel="noopener noreferrer"
-            className="text-sm font-mono truncate hover:text-white transition-colors"
+            className="text-sm font-mono truncate min-w-0 hover:text-white transition-colors"
             style={{ color: '#FFB800' }}>{url}</a>
         ) : (
-          <span className="text-sm font-mono text-white bg-[#3A3A3A] px-2.5 py-1 rounded truncate">{url}</span>
+          <span className="text-sm font-mono text-white bg-[#3A3A3A] px-2.5 py-1 rounded truncate min-w-0">{url}</span>
         )}
         <CopyButton text={url} />
       </div>

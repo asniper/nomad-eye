@@ -60,11 +60,29 @@ function Lightbox({ src, onClose }) {
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    // Escape does nothing on a touchscreen — without a real close button, the
+    // only way to dismiss on mobile is tapping the thin backdrop margin around
+    // a near-fullscreen image. Lock background scroll too so a stray drag on
+    // that backdrop doesn't scroll the page underneath instead of doing nothing.
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', handler)
+      document.body.style.overflow = prevOverflow
+    }
   }, [onClose])
   return (
     <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={onClose}>
       <img src={src} alt="detection" className="max-w-full max-h-full rounded-lg" onClick={e => e.stopPropagation()} />
+      <button
+        onClick={onClose}
+        className="absolute top-3 right-3 p-2 rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors"
+        title="Close"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
     </div>
   )
 }
@@ -120,6 +138,7 @@ function ClipPlayer({ eventId, onClose }) {
             src={src}
             controls
             autoPlay
+            playsInline
             className="w-full rounded-lg"
             style={{ maxHeight: '70vh', background: '#000' }}
           />
@@ -309,7 +328,7 @@ export default function Detections() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h2 className="text-2xl font-bold" style={{ color: '#FFB800' }}>Detection Events</h2>
         {clipsEnabled && clipStorage && clipStorage.clip_count > 0 && (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <span className="text-xs text-gray-500">
               {clipStorage.clip_count} clip{clipStorage.clip_count !== 1 ? 's' : ''} · {fmtBytes(clipStorage.clip_bytes)}
             </span>
@@ -401,7 +420,7 @@ export default function Detections() {
         ))}
 
         {!loading && totalPages > 0 && (
-          <div className="flex items-center justify-between mt-4 pt-4 border-t border-[#3A3A3A]">
+          <div className="flex items-center justify-between flex-wrap gap-2 mt-4 pt-4 border-t border-[#3A3A3A]">
             <button
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={page === 1}
@@ -409,7 +428,7 @@ export default function Detections() {
             >
               Previous
             </button>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-wrap justify-center">
               {Array.from({ length: totalPages }, (_, i) => i + 1)
                 .filter(n => n === 1 || n === totalPages || Math.abs(n - page) <= 2)
                 .reduce((acc, n, idx, arr) => {

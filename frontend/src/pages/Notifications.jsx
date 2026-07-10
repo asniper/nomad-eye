@@ -44,11 +44,11 @@ function Toggle({ enabled, onChange }) {
     <button
       onClick={() => onChange(!enabled)}
       className="relative shrink-0 rounded-full transition-colors duration-200 focus:outline-none"
-      style={{ width: 34, height: 18, background: enabled ? '#FFB800' : '#484848' }}
+      style={{ width: 40, height: 22, background: enabled ? '#FFB800' : '#484848' }}
     >
       <div
-        className="absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all duration-200"
-        style={{ left: enabled ? 16 : 2 }}
+        className="absolute w-4 h-4 rounded-full bg-white transition-all duration-200"
+        style={{ top: 3, left: enabled ? 20 : 3 }}
       />
     </button>
   )
@@ -123,7 +123,7 @@ function ContactForm({ onSave, onCancel, smsProvider }) {
         </p>
       )}
       {type === 'sms' && (
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <select
             value={carrier}
             onChange={e => setCarrier(e.target.value)}

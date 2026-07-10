@@ -89,9 +89,10 @@ function DebugPanel({ info }) {
 // only need to happen once. `children` renders into the same button row as
 // the controls below (e.g. navigation links to other panels), so callers can
 // extend the row without this component knowing about them.
-export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, children }) {
+export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, playback, onGoLive, children }) {
   const imgRef = useRef(null)
   const wsRef = useRef(null)
+  const lastFrameUrlRef = useRef(null)
   const [overlay, setOverlay] = useState(true)
   const [hiddenCategories, setHiddenCategories] = useState(() => {
     try {
@@ -152,8 +153,12 @@ export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, c
     })
   }, [sendFilter, cam.id])
 
+  const inPlayback = !!playback
+
   useEffect(() => {
-    if (!alive) { setConnected(false); return }
+    // Don't hold a live WS open (bandwidth/battery, especially on mobile) while
+    // the caller is showing a recorded clip instead of this component's own feed.
+    if (!alive || inPlayback) { setConnected(false); return }
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
     // Browsers can't set an Authorization header on a WebSocket handshake, so the
     // session token travels as a query param instead — see cameras.py's stream() route.
@@ -191,11 +196,20 @@ export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, c
         imgRef.current.src = url
         if (old.startsWith('blob:')) URL.revokeObjectURL(old)
       }
+      lastFrameUrlRef.current = url
       fpsCountRef.current++
     }
     const fpsTimer = setInterval(() => { setFps(fpsCountRef.current); fpsCountRef.current = 0 }, 1000)
-    return () => { intentionalClose.current = true; ws.close(); clearInterval(fpsTimer) }
-  }, [cam.id, wsKey, alive]) // eslint-disable-line react-hooks/exhaustive-deps
+    return () => {
+      intentionalClose.current = true
+      ws.close()
+      clearInterval(fpsTimer)
+      // The <img> unmounts (playback/offline) or gets a new src (reconnect)
+      // without ever revoking its own blob — this is the one place that
+      // reliably still has the reference once the DOM node might be gone.
+      if (lastFrameUrlRef.current) { URL.revokeObjectURL(lastFrameUrlRef.current); lastFrameUrlRef.current = null }
+    }
+  }, [cam.id, wsKey, alive, inPlayback]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleOverlayToggle = () => {
     const next = !overlay
@@ -300,30 +314,25 @@ export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, c
         >
           Debug
         </button>
-        <div className="flex items-center gap-1">
-          {nightModeHw ? (
-            <div className="flex rounded overflow-hidden border border-[#484848]"
-              title="Night vision — hardware IR LED control">
-              {[['off','Off'],['auto','Auto'],['on','On']].map(([val, label]) => (
-                <button
-                  key={val}
-                  onClick={() => handleNightMode(val)}
-                  disabled={!alive}
-                  className="px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50"
-                  style={nightMode === val
-                    ? { background: '#1a3a5c', color: '#60a5fa' }
-                    : { background: '#2A2A2A', color: '#6B7280' }}
-                >{label}</button>
-              ))}
-            </div>
-          ) : (
-            <span className="text-xs px-2 py-1 rounded"
-              style={{ background: '#2A2A2A', color: '#4B5563' }}
-              title="IR is photocell-controlled — no software override available">
-              Photocell IR
-            </span>
-          )}
-        </div>
+        {/* Most cameras switch IR on/off via an automatic photocell with no
+            software hook at all, so there's nothing controllable to show —
+            only render this when the camera actually exposes hardware control. */}
+        {nightModeHw && (
+          <div className="flex rounded overflow-hidden border border-[#484848]"
+            title="Night vision — hardware IR LED control">
+            {[['off','Off'],['auto','Auto'],['on','On']].map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => handleNightMode(val)}
+                disabled={!alive}
+                className="px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50"
+                style={nightMode === val
+                  ? { background: '#1a3a5c', color: '#60a5fa' }
+                  : { background: '#2A2A2A', color: '#6B7280' }}
+              >{label}</button>
+            ))}
+          </div>
+        )}
         {children}
       </div>
 
@@ -345,7 +354,39 @@ export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, c
       )}
 
       <div ref={videoContainerRef} className="group relative bg-black rounded-lg overflow-hidden aspect-video">
-        {!alive ? (
+        {playback ? (
+          <>
+            {playback.loading ? (
+              <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-sm">
+                Loading recording…
+              </div>
+            ) : playback.url ? (
+              <video
+                src={playback.url}
+                controls
+                autoPlay
+                playsInline
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-red-400 text-sm text-center px-4">
+                Failed to load that recording.
+              </div>
+            )}
+            <button
+              onClick={onGoLive}
+              className="absolute top-2 left-2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 text-white text-xs font-medium hover:bg-black/80 transition-colors"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+              Live Mode
+            </button>
+            {playback.label && (
+              <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-black/50 text-white text-xs font-mono pointer-events-none select-none">
+                {playback.label}
+              </div>
+            )}
+          </>
+        ) : !alive ? (
           <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-sm text-center px-4">
             {cam.enabled === false
               ? 'Camera disabled'

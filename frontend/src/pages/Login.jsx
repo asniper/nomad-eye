@@ -20,7 +20,7 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-[#1A1A1A] flex items-center justify-center">
+    <div className="min-h-screen bg-[#1A1A1A] flex items-center justify-center p-4">
       <div className="bg-[#2E2E2E] p-8 rounded-xl w-full max-w-sm shadow-2xl border border-[#3A3A3A]">
         <div className="mb-6">
           <img src={logoUrl} alt="Nomad Eye" className="h-auto w-auto mx-auto block" />

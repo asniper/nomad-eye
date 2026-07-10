@@ -249,11 +249,11 @@ function ZoneEditor({ camId }) {
       {zones.length > 0 ? (
         <div className="space-y-1">
           {zones.map(z => (
-            <div key={z.id} className="flex items-center justify-between text-xs">
-              <span style={{ color: ZONE_STROKE[z.zone_type] }}>
+            <div key={z.id} className="flex items-center justify-between flex-wrap gap-2 text-xs">
+              <span className="min-w-0 break-words" style={{ color: ZONE_STROKE[z.zone_type] }}>
                 {z.zone_type === 'exclude' ? 'Ignore' : 'Only'}{z.name ? ` "${z.name}"` : ''} — {z.categories ? z.categories.join(', ') : 'all categories'}
               </span>
-              <button onClick={() => removeZone(z.id)} className="text-gray-500 hover:text-red-400">Delete</button>
+              <button onClick={() => removeZone(z.id)} className="text-gray-500 hover:text-red-400 shrink-0">Delete</button>
             </div>
           ))}
         </div>
@@ -558,23 +558,32 @@ function safeTz(tz) {
 
 const SEGMENT_MINUTES = 5
 
-function ContinuousTab({ camId }) {
+// The actual <video> lives in the shared CameraLiveView display at the top of
+// the page (so playing a recording and going back live both happen in one
+// place) — this tab owns the day/segment list and the lock/download/delete
+// actions, and drives that shared player via the selectedSegment/onSelect
+// props lifted up to CameraDetail.
+function ContinuousTab({ camId, selectedSegment, videoUrl, videoLoading, onSelectSegment, onGoLive, onSegmentDeleted }) {
   const tz = safeTz(getTimezone())
   const [summary, setSummary] = useState(null)
-  const [dateStr, setDateStr] = useState(() => todayStr(tz))
+  // If a segment is already selected when this mounts (e.g. the user switched
+  // to another tab and back while a recording was playing), show that
+  // segment's day instead of defaulting to today, so the timeline still
+  // highlights it instead of looking like nothing is selected.
+  const [dateStr, setDateStr] = useState(() =>
+    selectedSegment ? new Date(selectedSegment.started_at).toLocaleDateString('en-CA', { timeZone: tz }) : todayStr(tz)
+  )
   const [segments, setSegments] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [selectedId, setSelectedId] = useState(null)
-  const [videoUrl, setVideoUrl] = useState(null)
-  const [videoLoading, setVideoLoading] = useState(false)
   const [lockBusy, setLockBusy] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [nowMinutes, setNowMinutes] = useState(() => localMinutesOfDay(new Date().toISOString(), tz))
-  const videoUrlRef = useRef(null)
-  const selectRequestRef = useRef(0)
+  const isMountRef = useRef(true)
 
-  const selected = segments.find(s => s.id === selectedId) || null
+  const selected = selectedSegment
+    ? segments.find(s => s.id === selectedSegment.id) || selectedSegment
+    : null
   const isToday = dateStr === todayStr(tz)
 
   const segmentsWithMinutes = useMemo(
@@ -606,35 +615,15 @@ function ContinuousTab({ camId }) {
 
   useEffect(() => {
     loadDay()
-    setSelectedId(null)
-    if (videoUrlRef.current) { URL.revokeObjectURL(videoUrlRef.current); videoUrlRef.current = null }
-    setVideoUrl(null)
-  }, [loadDay])
-
-  useEffect(() => {
-    return () => { if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current) }
-  }, [])
-
-  const selectSegment = async (seg) => {
-    setSelectedId(seg.id)
-    setVideoLoading(true)
-    setVideoUrl(null)
-    const requestId = ++selectRequestRef.current
-    try {
-      const r = await detectionsApi.continuousVideo(seg.id)
-      // Clicking a second segment before the first's fetch resolves must not let
-      // the stale response overwrite the newer selection's video.
-      if (requestId !== selectRequestRef.current) return
-      const url = URL.createObjectURL(r.data)
-      if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current)
-      videoUrlRef.current = url
-      setVideoUrl(url)
-    } catch {
-      if (requestId === selectRequestRef.current) setError('Failed to load that recording.')
-    } finally {
-      if (requestId === selectRequestRef.current) setVideoLoading(false)
-    }
-  }
+    // This tab fully unmounts/remounts on every switch away from and back to
+    // the Continuous tab (see the `{tab === 'continuous' && ...}` guard below),
+    // which would otherwise re-run this effect and clear an active recording
+    // selection just from switching tabs and back. Only clear it on an actual
+    // day change (Prev/Next/Jump-to-today) after the initial mount — not on
+    // the mount itself.
+    if (!isMountRef.current) onGoLive()
+    isMountRef.current = false
+  }, [loadDay]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleLock = async () => {
     if (!selected) return
@@ -666,11 +655,10 @@ function ContinuousTab({ camId }) {
     if (!window.confirm(msg)) return
     setDeleteBusy(true)
     try {
-      await detectionsApi.deleteContinuous(selected.id)
-      setSegments(prev => prev.filter(s => s.id !== selected.id))
-      setSelectedId(null)
-      if (videoUrlRef.current) { URL.revokeObjectURL(videoUrlRef.current); videoUrlRef.current = null }
-      setVideoUrl(null)
+      const deletedId = selected.id
+      await detectionsApi.deleteContinuous(deletedId)
+      setSegments(prev => prev.filter(s => s.id !== deletedId))
+      onSegmentDeleted(deletedId)
       detectionsApi.continuousSummary(camId).then(r => setSummary(r.data)).catch(() => {})
     } catch {
       setError('Failed to delete recording.')
@@ -711,14 +699,14 @@ function ContinuousTab({ camId }) {
       </Card>
 
       <Card>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => setDateStr(d => shiftDay(d, -1))}
               disabled={atOldest}
               className="px-2 py-1 rounded text-xs bg-[#3A3A3A] hover:bg-[#484848] text-white disabled:opacity-30 transition-colors"
             >‹ Prev</button>
-            <span className="text-sm text-white font-medium min-w-[11rem] text-center">{formatDayLabel(dateStr)}</span>
+            <span className="text-sm text-white font-medium min-w-[9rem] sm:min-w-[11rem] text-center">{formatDayLabel(dateStr)}</span>
             <button
               onClick={() => setDateStr(d => shiftDay(d, 1))}
               disabled={isToday}
@@ -745,11 +733,11 @@ function ContinuousTab({ camId }) {
             {segmentsWithMinutes.map(seg => {
               const leftPct = (seg.startMin / 1440) * 100
               const widthPct = (SEGMENT_MINUTES / 1440) * 100
-              const isSelected = selectedId === seg.id
+              const isSelected = selectedSegment?.id === seg.id
               return (
                 <button
                   key={seg.id}
-                  onClick={() => selectSegment(seg)}
+                  onClick={() => onSelectSegment(seg)}
                   title={formatDateTime(seg.started_at)}
                   className="absolute top-1 bottom-1 rounded-sm transition-colors"
                   style={{
@@ -778,7 +766,8 @@ function ContinuousTab({ camId }) {
 
       {selected && (
         <Card>
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <p className="text-xs text-gray-500 mb-3">▲ Now playing in the viewer above</p>
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <p className="text-sm text-white font-medium">{formatDateTime(selected.started_at)}</p>
               {selected.locked && (
@@ -814,11 +803,6 @@ function ContinuousTab({ camId }) {
               </button>
             </div>
           </div>
-          {videoLoading ? (
-            <div className="w-full aspect-video bg-[#3A3A3A] rounded-lg animate-pulse" />
-          ) : videoUrl ? (
-            <video src={videoUrl} controls autoPlay className="w-full rounded-lg" style={{ background: '#000' }} />
-          ) : null}
         </Card>
       )}
     </div>
@@ -840,6 +824,19 @@ export default function CameraDetail() {
   const [editingName, setEditingName] = useState(false)
   const [status, setStatus] = useState({ connected: false, reloading: false, fps: 0 })
 
+  // Playback state lives here, not inside ContinuousTab, so the single shared
+  // <video>/live view at the top of the page can show either the live feed or
+  // a selected recording — otherwise the two would need their own separate
+  // players.
+  const [selectedSegment, setSelectedSegment] = useState(null)
+  const [videoUrl, setVideoUrl] = useState(null)
+  const [videoLoading, setVideoLoading] = useState(false)
+  const videoUrlRef = useRef(null)
+  const selectRequestRef = useRef(0)
+  const videoCardRef = useRef(null)
+  const selectedSegmentRef = useRef(null)
+  useEffect(() => { selectedSegmentRef.current = selectedSegment }, [selectedSegment])
+
   const reload = useCallback(() => {
     return cameras.list().then(r => {
       const found = r.data.find(c => c.id === Number(cameraId))
@@ -851,6 +848,54 @@ export default function CameraDetail() {
   }, [cameraId])
 
   useEffect(() => { reload().finally(() => setLoading(false)) }, [reload])
+
+  const goLive = useCallback(() => {
+    // Bump the request counter so an already-in-flight selectSegment fetch
+    // (started before this call) recognizes itself as stale when it resolves,
+    // instead of silently resurrecting a blob URL nothing points to anymore.
+    selectRequestRef.current++
+    setSelectedSegment(null)
+    setVideoLoading(false)
+    if (videoUrlRef.current) { URL.revokeObjectURL(videoUrlRef.current); videoUrlRef.current = null }
+    setVideoUrl(null)
+  }, [])
+
+  // Delete only clears playback if the deleted segment is still the active
+  // selection at the moment the delete actually resolves — the user may have
+  // picked a different segment while the delete request was in flight, and
+  // that newer selection must survive.
+  const handleSegmentDeleted = useCallback((deletedId) => {
+    if (selectedSegmentRef.current?.id === deletedId) goLive()
+  }, [goLive])
+
+  // This component doesn't remount across /cameras/:id navigation (same route,
+  // just a changed param), so playback state from the previous camera has to
+  // be explicitly cleared rather than relying on fresh initial state.
+  useEffect(() => { goLive() }, [cameraId, goLive])
+
+  useEffect(() => () => { if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current) }, [])
+
+  const selectSegment = useCallback(async (seg) => {
+    setSelectedSegment(seg)
+    setVideoLoading(true)
+    setVideoUrl(null)
+    videoCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const requestId = ++selectRequestRef.current
+    try {
+      const r = await detectionsApi.continuousVideo(seg.id)
+      // Clicking a second segment before the first's fetch resolves must not let
+      // the stale response overwrite the newer selection's video.
+      if (requestId !== selectRequestRef.current) return
+      const url = URL.createObjectURL(r.data)
+      if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current)
+      videoUrlRef.current = url
+      setVideoUrl(url)
+    } catch {
+      // playback.url stays null — CameraLiveView renders the "failed to load" state
+    } finally {
+      if (requestId === selectRequestRef.current) setVideoLoading(false)
+    }
+  }, [])
 
   const saveName = async () => {
     setEditingName(false)
@@ -894,20 +939,29 @@ export default function CameraDetail() {
         {status.connected && !status.reloading && <span className="text-xs text-gray-500">{status.fps} fps</span>}
       </div>
 
-      <Card>
-        {/* key={cam.id} forces a remount on navigation between two /cameras/:id URLs
-            (same route, changed param) — without it CameraLiveView's internal state
-            (hidden categories, debug mode, night mode, overlay) would carry over
-            from whichever camera was previously shown. */}
-        <CameraLiveView key={cam.id} cam={cam} onEnabledChange={reload} onStatusChange={setStatus} />
-      </Card>
+      <div ref={videoCardRef}>
+        <Card>
+          {/* key={cam.id} forces a remount on navigation between two /cameras/:id URLs
+              (same route, changed param) — without it CameraLiveView's internal state
+              (hidden categories, debug mode, night mode, overlay) would carry over
+              from whichever camera was previously shown. */}
+          <CameraLiveView
+            key={cam.id}
+            cam={cam}
+            onEnabledChange={reload}
+            onStatusChange={setStatus}
+            playback={selectedSegment ? { loading: videoLoading, url: videoUrl, label: formatDateTime(selectedSegment.started_at) } : null}
+            onGoLive={goLive}
+          />
+        </Card>
+      </div>
 
-      <div className="flex items-center gap-1.5 border-b border-[#3A3A3A]">
+      <div className="flex items-center gap-1.5 border-b border-[#3A3A3A] overflow-x-auto">
         {TABS.map(t => (
           <button
             key={t.key}
             onClick={() => setSearchParams(t.key === 'continuous' ? {} : { tab: t.key })}
-            className="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px"
+            className="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px shrink-0"
             style={tab === t.key
               ? { color: '#FFB800', borderColor: '#FFB800' }
               : { color: '#9CA3AF', borderColor: 'transparent' }}
@@ -917,7 +971,17 @@ export default function CameraDetail() {
         ))}
       </div>
 
-      {tab === 'continuous' && <ContinuousTab camId={cam.id} />}
+      {tab === 'continuous' && (
+        <ContinuousTab
+          camId={cam.id}
+          selectedSegment={selectedSegment}
+          videoUrl={videoUrl}
+          videoLoading={videoLoading}
+          onSelectSegment={selectSegment}
+          onGoLive={goLive}
+          onSegmentDeleted={handleSegmentDeleted}
+        />
+      )}
       {tab === 'zones' && <ZoneEditor camId={cam.id} />}
       {tab === 'adjust' && <AdjustPanel camId={cam.id} />}
       {tab === 'face' && <FacePanel cam={cam} onUpdate={patch => setCam(prev => ({ ...prev, ...patch }))} />}

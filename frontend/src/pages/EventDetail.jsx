@@ -75,7 +75,16 @@ function Lightbox({ ids, initialIndex, onClose }) {
       if (e.key === 'ArrowRight') setIndex(i => Math.min(ids.length - 1, i + 1))
     }
     window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
+    // Escape does nothing on a touchscreen — without a real close button, the
+    // only way to dismiss on mobile is tapping the thin backdrop margin around
+    // a near-fullscreen image. Lock background scroll too so a stray drag on
+    // that backdrop doesn't scroll the page underneath instead of doing nothing.
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', h)
+      document.body.style.overflow = prevOverflow
+    }
   }, [onClose, ids.length])
 
   const handleTouchStart = (e) => { touchStartX.current = e.touches[0].clientX }
@@ -117,6 +126,15 @@ function Lightbox({ ids, initialIndex, onClose }) {
           {index + 1} / {ids.length}
         </div>
       )}
+      <button
+        onClick={onClose}
+        className="absolute top-3 right-3 p-2 rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors z-10"
+        title="Close"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
     </div>
   )
 }
@@ -202,6 +220,7 @@ function ClipSection({ eventId, onDeleted }) {
           src={src}
           controls
           autoPlay
+          playsInline
           className="w-full rounded-lg"
           style={{ background: '#000' }}
         />
