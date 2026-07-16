@@ -112,8 +112,8 @@ function TailscaleCard() {
   const enableHttps = async () => {
     setEnablingHttps(true); setHttpsResult(null)
     try {
-      const r = await network.tailscaleEnableHttps()
-      setHttpsResult({ ok: true, hostname: r.data.hostname })
+      await network.tailscaleEnableHttps()
+      await fetchStatus()
     } catch (e) {
       setHttpsResult({ ok: false, error: e?.response?.data?.detail || 'Failed to issue certificate' })
     } finally { setEnablingHttps(false) }
@@ -292,23 +292,27 @@ function TailscaleCard() {
               {ts.dns_name && (
                 <div className="pt-2 border-t border-[#2E2E2E] space-y-1.5">
                   <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">HTTPS</p>
-                  <p className="text-xs text-gray-500">
-                    The device currently uses a self-signed certificate for local access (one-time browser warning).
-                    This issues a real, trusted certificate for <span className="font-mono">{ts.dns_name}</span> via Tailscale
-                    — requires HTTPS Certificates enabled on your tailnet in the Tailscale admin console.
-                  </p>
-                  <button
-                    onClick={enableHttps}
-                    disabled={enablingHttps}
-                    className="text-xs px-3 py-1.5 rounded-md disabled:opacity-40 hover:opacity-80 transition-opacity"
-                    style={{ background: '#2a3a2a', color: '#9CA3AF', border: '1px solid #3a4a3a' }}
-                  >
-                    {enablingHttps ? 'Issuing certificate…' : 'Enable HTTPS via Tailscale'}
-                  </button>
-                  {httpsResult?.ok && (
+                  {ts.tailscale_https ? (
                     <p className="text-xs text-green-400">
-                      Done — visit <span className="font-mono">https://{httpsResult.hostname}</span> to use it.
+                      ✓ Trusted certificate active for <span className="font-mono">https://{ts.https_hostname || ts.dns_name}</span>
+                      {ts.https_expires && <span className="text-gray-500"> — expires {ts.https_expires}</span>}
                     </p>
+                  ) : (
+                    <>
+                      <p className="text-xs text-gray-500">
+                        The device currently uses a self-signed certificate for local access (one-time browser warning).
+                        This issues a real, trusted certificate for <span className="font-mono">{ts.dns_name}</span> via Tailscale
+                        — requires HTTPS Certificates enabled on your tailnet in the Tailscale admin console.
+                      </p>
+                      <button
+                        onClick={enableHttps}
+                        disabled={enablingHttps}
+                        className="text-xs px-3 py-1.5 rounded-md disabled:opacity-40 hover:opacity-80 transition-opacity"
+                        style={{ background: '#2a3a2a', color: '#9CA3AF', border: '1px solid #3a4a3a' }}
+                      >
+                        {enablingHttps ? 'Issuing certificate…' : 'Enable HTTPS via Tailscale'}
+                      </button>
+                    </>
                   )}
                   {httpsResult && !httpsResult.ok && (
                     <p className="text-xs text-red-400">{httpsResult.error}</p>

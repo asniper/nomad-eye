@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import subprocess
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from pydantic import BaseModel
@@ -20,6 +21,35 @@ def _set_tailscale_operator():
         )
     except Exception:
         pass
+
+
+_NGINX_CERT = '/etc/nginx/ssl/nomadeye.crt'
+
+
+def _https_cert_info():
+    """Inspect the deployed nginx cert to see if it's the Tailscale/Let's Encrypt
+    cert (vs the self-signed LAN default). Reads the actual file on disk rather
+    than trusting any in-memory state, so this survives page reloads and restarts."""
+    try:
+        r = subprocess.run(
+            ['openssl', 'x509', '-in', _NGINX_CERT, '-noout', '-issuer', '-subject', '-enddate'],
+            capture_output=True, text=True, timeout=5
+        )
+        if r.returncode != 0:
+            return {"tailscale_https": False, "https_hostname": None, "https_expires": None}
+        out = r.stdout
+        is_le = 'Let\'s Encrypt' in out
+        hostname_match = re.search(r'CN\s*=\s*([^\n,]+)', out)
+        hostname = hostname_match.group(1).strip() if hostname_match else None
+        end_match = re.search(r'notAfter=(.+)', out)
+        expires = end_match.group(1).strip() if end_match else None
+        return {
+            "tailscale_https": is_le and bool(hostname) and hostname.endswith('.ts.net'),
+            "https_hostname": hostname if is_le else None,
+            "https_expires": expires if is_le else None,
+        }
+    except Exception:
+        return {"tailscale_https": False, "https_hostname": None, "https_expires": None}
 
 router = APIRouter()
 
@@ -232,15 +262,16 @@ def tailscale_logout(_=Depends(require_admin)):
 
 @router.get("/tailscale")
 def tailscale_status(_=Depends(require_admin)):
+    cert = _https_cert_info()
     try:
         r = subprocess.run(['tailscale', 'status', '--json'],
                            capture_output=True, text=True, timeout=5)
     except FileNotFoundError:
-        return {"installed": False, "connected": False, "ip": None, "hostname": None, "dns_name": None}
+        return {"installed": False, "connected": False, "ip": None, "hostname": None, "dns_name": None, **cert}
     except Exception:
-        return {"installed": True, "connected": False, "ip": None, "hostname": None, "dns_name": None}
+        return {"installed": True, "connected": False, "ip": None, "hostname": None, "dns_name": None, **cert}
     if r.returncode != 0:
-        return {"installed": True, "connected": False, "ip": None, "hostname": None, "dns_name": None}
+        return {"installed": True, "connected": False, "ip": None, "hostname": None, "dns_name": None, **cert}
     try:
         data = json.loads(r.stdout)
         self_node = data.get('Self', {})
@@ -253,9 +284,10 @@ def tailscale_status(_=Depends(require_admin)):
             "ip": ipv4,
             "hostname": self_node.get('HostName', ''),
             "dns_name": dns_name,
+            **cert,
         }
     except Exception:
-        return {"installed": True, "connected": False, "ip": None, "hostname": None, "dns_name": None}
+        return {"installed": True, "connected": False, "ip": None, "hostname": None, "dns_name": None, **cert}
 
 
 @router.post("/tailscale/enable-https")
