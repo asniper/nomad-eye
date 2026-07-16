@@ -41,6 +41,9 @@ if [ "$ACTION" = "tls-enable-tailscale" ]; then
         echo "Could not determine Tailscale MagicDNS hostname — is Tailscale connected and MagicDNS enabled?" >&2
         exit 1
     fi
+    # tailscale cert writes atomically (temp file in this dir, then rename) — it fails
+    # with a raw ENOENT on the temp file, not a friendly error, if the dir is missing.
+    mkdir -p /etc/nginx/ssl
     # Redirect stdout — `tailscale cert` prints its own status line, which would
     # otherwise get mixed into the hostname this script echoes on success.
     tailscale cert --cert-file /etc/nginx/ssl/nomadeye.crt --key-file /etc/nginx/ssl/nomadeye.key "$TS_HOSTNAME" >/dev/null
