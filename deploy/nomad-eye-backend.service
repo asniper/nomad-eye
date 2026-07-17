@@ -10,5 +10,13 @@ ExecStart=/opt/nomad-eye/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --po
 Restart=always
 RestartSec=5
 
+# Safety net for heavy AI workloads (open-vocab models, multiple cameras, continuous
+# recording) on resource-constrained ARM boxes: cap this unit's memory via cgroups so a
+# leak/spike gets killed and restarted in seconds, instead of swapping the whole device
+# into unresponsiveness until something else happens to restart it.
+MemoryHigh=2200M
+MemoryMax=2560M
+OOMPolicy=kill
+
 [Install]
 WantedBy=multi-user.target
