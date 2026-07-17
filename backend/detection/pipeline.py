@@ -14,7 +14,7 @@ from detection.overlay import draw_boxes, draw_info_bar, format_camera_time_str
 from notifications.dispatcher import dispatch_notification, dispatch_camera_health_notification
 from config.settings import get_settings
 from storage.manager import get_active_images_dir, get_active_clips_dir
-from detection.clip_writer import ClipBuffer, EventClipWriter, CLIP_PUSH_INTERVAL
+from detection.clip_writer import ClipBuffer, EventClipWriter, CLIP_WIDTH, CLIP_HEIGHT, CLIP_FPS
 from detection.continuous_recorder import SegmentWriter
 import sqlite3
 import shutil as _shutil
@@ -199,6 +199,11 @@ class DetectionPipeline:
         self._clips_enabled: bool = False
         self._clip_pre_roll: int = 5
         self._clip_post_roll: int = 10
+        # Recording quality — shared by event clips and continuous recording.
+        # Defaults match the historical hardcoded values in clip_writer.py.
+        self._recording_width: int = CLIP_WIDTH
+        self._recording_height: int = CLIP_HEIGHT
+        self._recording_fps: float = CLIP_FPS
         self._clip_buffers: dict = {}      # camera_id -> ClipBuffer
         self._clip_writers: dict = {}      # camera_id -> {event_id -> EventClipWriter}
         self._clip_lock = threading.Lock()
@@ -341,6 +346,16 @@ class DetectionPipeline:
         # Apply immediately to running cameras when AI is off (AI mode overrides quality).
         if not self._ai_enabled:
             self._reload_all_cameras_bg()
+
+    def set_recording_quality(self, width: int, height: int, fps: float):
+        """Applies to the next event clip / continuous segment opened — in-flight
+        writers keep whatever resolution/fps they were created with. Also drops
+        the persistent per-camera pre-roll ring buffers so they get rebuilt at
+        the new dimensions instead of silently keeping the old ones forever."""
+        self._recording_width = width
+        self._recording_height = height
+        self._recording_fps = fps
+        self._clip_buffers.clear()
 
     def set_clips_config(self, enabled: bool, pre_roll: int, post_roll: int):
         was_enabled = self._clips_enabled
@@ -541,7 +556,9 @@ class DetectionPipeline:
             seg_dir = Path(clips_dir) / 'continuous' / f'cam{camera_id}'
             ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
             seg_path = str(seg_dir / f'{ts}.mp4')
-            writer = SegmentWriter(seg_path, camera_id=camera_id)
+            writer = SegmentWriter(seg_path, camera_id=camera_id,
+                                    width=self._recording_width, height=self._recording_height,
+                                    fps=self._recording_fps)
             self._continuous_writers[camera_id] = writer
             return writer
         except Exception:
@@ -891,7 +908,7 @@ class DetectionPipeline:
             # independently toggleable, but the overlay burn-in only needs computing once.
             if self._clips_enabled or self._continuous_enabled:
                 last_push = self._last_clip_push.get(cam.camera_id, 0)
-                if now - last_push >= CLIP_PUSH_INTERVAL:
+                if now - last_push >= 1.0 / self._recording_fps:
                     # Burn in the same camera/time/detection overlay as the event snapshots,
                     # on a copy — the raw `frame` is still needed below for motion/YOLO.
                     cam_name, tz_name = self._get_clip_overlay_meta(cam.camera_id, now)
@@ -906,7 +923,9 @@ class DetectionPipeline:
 
                     if self._clips_enabled:
                         if cam.camera_id not in self._clip_buffers:
-                            self._clip_buffers[cam.camera_id] = ClipBuffer(self._clip_pre_roll)
+                            self._clip_buffers[cam.camera_id] = ClipBuffer(
+                                self._clip_pre_roll, width=self._recording_width,
+                                height=self._recording_height, fps=self._recording_fps)
                         self._clip_buffers[cam.camera_id].push(annotated)
                         with self._clip_lock:
                             cam_writers = dict(self._clip_writers.get(cam.camera_id, {}))
@@ -1150,13 +1169,14 @@ class DetectionPipeline:
                         )
                         _eid = ev['event_id']
                         _cid = cam.camera_id
-                        def _mk_writer(eid=_eid, cp=clip_path, pr=pre_roll, cid=_cid):
+                        _w, _h, _fps = self._recording_width, self._recording_height, self._recording_fps
+                        def _mk_writer(eid=_eid, cp=clip_path, pr=pre_roll, cid=_cid, w=_w, h=_h, fps=_fps):
                             try:
-                                w = EventClipWriter(cp, pr, camera_id=cid)
+                                w_ = EventClipWriter(cp, pr, camera_id=cid, width=w, height=h, fps=fps)
                                 with self._clip_lock:
                                     if cid not in self._clip_writers:
                                         self._clip_writers[cid] = {}
-                                    self._clip_writers[cid][eid] = w
+                                    self._clip_writers[cid][eid] = w_
                             except Exception:
                                 pass
                         threading.Thread(target=_mk_writer, daemon=True).start()

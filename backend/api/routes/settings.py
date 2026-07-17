@@ -139,6 +139,17 @@ async def set_setting(body: ConfigItem, db: sqlite3.Connection = Depends(get_db)
             )
         except ValueError:
             pass
+    elif body.key in ('recording_width', 'recording_height', 'recording_fps') and _pipeline is not None:
+        s = db.execute("SELECT key, value FROM app_config WHERE key IN ('recording_width','recording_height','recording_fps')").fetchall()
+        kv = {r['key']: r['value'] for r in s}
+        try:
+            _pipeline.set_recording_quality(
+                int(kv.get('recording_width', 640)),
+                int(kv.get('recording_height', 360)),
+                float(kv.get('recording_fps', 5)),
+            )
+        except ValueError:
+            pass
     return {"saved": True}
 
 

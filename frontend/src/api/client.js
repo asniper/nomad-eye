@@ -86,6 +86,7 @@ export const detections = {
   continuousVideo: (segmentId, config) => api.get(`/detections/continuous/${segmentId}/video`, { responseType: 'blob', ...config }),
   deleteContinuous: (segmentId) => api.delete(`/detections/continuous/${segmentId}`),
   lockContinuous: (segmentId, locked) => api.post(`/detections/continuous/${segmentId}/lock`, { locked }),
+  setContinuousDescription: (segmentId, description) => api.patch(`/detections/continuous/${segmentId}/description`, { description }),
 }
 
 export const notifications = {

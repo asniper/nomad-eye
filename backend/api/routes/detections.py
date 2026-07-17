@@ -381,7 +381,7 @@ def list_continuous_segments(
     start_iso = start_local.astimezone(timezone.utc).isoformat()
     end_iso = end_local.astimezone(timezone.utc).isoformat()
     rows = db.execute(
-        "SELECT id, camera_id, started_at, locked FROM continuous_segments WHERE camera_id=? "
+        "SELECT id, camera_id, started_at, locked, description FROM continuous_segments WHERE camera_id=? "
         "AND started_at >= ? AND started_at < ? "
         "ORDER BY started_at ASC LIMIT 500",
         (camera_id, start_iso, end_iso)
@@ -414,7 +414,7 @@ def list_locked_continuous_segments(
     survive across the day-by-day timeline, so finding one shouldn't require
     paging back through calendar days to spot it."""
     rows = db.execute(
-        "SELECT id, camera_id, started_at, locked FROM continuous_segments "
+        "SELECT id, camera_id, started_at, locked, description FROM continuous_segments "
         "WHERE camera_id=? AND locked=1 ORDER BY started_at DESC LIMIT 200",
         (camera_id,)
     ).fetchall()
@@ -438,6 +438,26 @@ def lock_continuous_segment(
     if cur.rowcount == 0:
         raise HTTPException(status_code=404, detail="Segment not found")
     return {"id": segment_id, "locked": body.locked}
+
+
+class DescriptionBody(BaseModel):
+    description: str
+
+
+@router.patch("/continuous/{segment_id}/description")
+def set_continuous_description(
+    segment_id: int, body: DescriptionBody,
+    db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator),
+):
+    text = body.description.strip()[:500]
+    cur = db.execute(
+        "UPDATE continuous_segments SET description=? WHERE id=?",
+        (text or None, segment_id)
+    )
+    db.commit()
+    if cur.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Segment not found")
+    return {"id": segment_id, "description": text}
 
 
 @router.get("/continuous/{segment_id}/video")

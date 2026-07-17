@@ -5,6 +5,8 @@ import threading
 from collections import deque
 from pathlib import Path
 
+# Defaults — overridable per-instance via DetectionPipeline.set_recording_quality(),
+# which sources current values from the recording_width/height/fps app_config keys.
 CLIP_FPS = 5.0
 CLIP_PUSH_INTERVAL = 1.0 / CLIP_FPS
 CLIP_WIDTH = 640
@@ -15,15 +17,17 @@ CLIP_MAX_DURATION = 120.0  # hard cap: 2 minutes per clip regardless of ongoing 
 class ClipBuffer:
     """Per-camera JPEG ring buffer for clip pre-roll. Thread-safe."""
 
-    def __init__(self, pre_roll_secs: float):
-        max_frames = int(pre_roll_secs * CLIP_FPS) + 10
+    def __init__(self, pre_roll_secs: float, width: int = CLIP_WIDTH, height: int = CLIP_HEIGHT, fps: float = CLIP_FPS):
+        self._width = width
+        self._height = height
+        max_frames = int(pre_roll_secs * fps) + 10
         self._buf: deque = deque(maxlen=max_frames)
         self._lock = threading.Lock()
 
     def push(self, frame_bgr):
         try:
-            if frame_bgr.shape[:2] != (CLIP_HEIGHT, CLIP_WIDTH):
-                frame_bgr = cv2.resize(frame_bgr, (CLIP_WIDTH, CLIP_HEIGHT))
+            if frame_bgr.shape[:2] != (self._height, self._width):
+                frame_bgr = cv2.resize(frame_bgr, (self._width, self._height))
             ret, enc = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
             if ret:
                 with self._lock:
@@ -39,9 +43,12 @@ class ClipBuffer:
 class EventClipWriter:
     """Writes one MP4 clip for one event: pre-roll JPEG frames + live frames."""
 
-    def __init__(self, output_path: str, pre_roll: list, camera_id: int = 0):
+    def __init__(self, output_path: str, pre_roll: list, camera_id: int = 0,
+                 width: int = CLIP_WIDTH, height: int = CLIP_HEIGHT, fps: float = CLIP_FPS):
         self._path = output_path
         self._camera_id = camera_id
+        self._width = width
+        self._height = height
         self._lock = threading.Lock()
         self._closed = False
         self._start = time.time()
@@ -52,7 +59,7 @@ class EventClipWriter:
         # Write with mp4v (compatible with pip opencv-python-headless bundled FFmpeg).
         # pipeline.py converts to H.264 via system ffmpeg after recording completes.
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        self._writer = cv2.VideoWriter(output_path, fourcc, CLIP_FPS, (CLIP_WIDTH, CLIP_HEIGHT))
+        self._writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
         for jpeg_bytes in pre_roll:
             self._write_jpeg(jpeg_bytes)
@@ -62,8 +69,8 @@ class EventClipWriter:
             arr = np.frombuffer(jpeg_bytes, dtype='uint8')
             frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
             if frame is not None:
-                if frame.shape[:2] != (CLIP_HEIGHT, CLIP_WIDTH):
-                    frame = cv2.resize(frame, (CLIP_WIDTH, CLIP_HEIGHT))
+                if frame.shape[:2] != (self._height, self._width):
+                    frame = cv2.resize(frame, (self._width, self._height))
                 self._writer.write(frame)
         except Exception:
             pass
@@ -75,8 +82,8 @@ class EventClipWriter:
                 return
             try:
                 f = frame_bgr
-                if f.shape[:2] != (CLIP_HEIGHT, CLIP_WIDTH):
-                    f = cv2.resize(f, (CLIP_WIDTH, CLIP_HEIGHT))
+                if f.shape[:2] != (self._height, self._width):
+                    f = cv2.resize(f, (self._width, self._height))
                 self._writer.write(f)
             except Exception:
                 pass

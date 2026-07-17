@@ -569,6 +569,9 @@ function ContinuousTab({ camId, selectedSegment, onSelectSegment, onGoLive, onNa
   const tz = safeTz(getTimezone())
   const [summary, setSummary] = useState(null)
   const [lockedSegments, setLockedSegments] = useState([])
+  const [editingDescId, setEditingDescId] = useState(null)
+  const [descDraft, setDescDraft] = useState('')
+  const [savingDesc, setSavingDesc] = useState(false)
   // If a segment is already selected when this mounts (e.g. the user switched
   // to another tab and back while a recording was playing), show that
   // segment's day instead of defaulting to today, so the timeline still
@@ -611,6 +614,27 @@ function ContinuousTab({ camId, selectedSegment, onSelectSegment, onGoLive, onNa
   }, [camId])
 
   useEffect(() => { loadLocked() }, [loadLocked])
+
+  const startEditingDesc = (seg) => {
+    setEditingDescId(seg.id)
+    setDescDraft(seg.description || '')
+  }
+
+  const cancelEditingDesc = () => {
+    setEditingDescId(null)
+    setDescDraft('')
+  }
+
+  const saveDesc = async (segId) => {
+    setSavingDesc(true)
+    try {
+      await detectionsApi.setContinuousDescription(segId, descDraft)
+      setLockedSegments(prev => prev.map(s => s.id === segId ? { ...s, description: descDraft.trim() } : s))
+      setEditingDescId(null)
+      setDescDraft('')
+    } catch {}
+    setSavingDesc(false)
+  }
 
   useEffect(() => {
     advanceRef.current = nextSegment ? () => onSelectSegment(nextSegment, { scrollIntoView: false }) : null
@@ -782,22 +806,65 @@ function ContinuousTab({ camId, selectedSegment, onSelectSegment, onGoLive, onNa
           <div className="space-y-1">
             {lockedSegments.map(seg => {
               const isSelected = selectedSegment?.id === seg.id
+              const isEditing = editingDescId === seg.id
               return (
-                <button
+                <div
                   key={seg.id}
-                  onClick={() => onSelectSegment(seg)}
-                  className="w-full flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded transition-colors hover:bg-[#3A3A3A]"
+                  className="w-full flex items-center gap-2 text-xs px-2 py-1.5 rounded transition-colors hover:bg-[#3A3A3A]"
                   style={isSelected ? { background: 'rgba(255,184,0,0.12)' } : {}}
                 >
-                  <span className="flex items-center gap-1.5 text-gray-300">
+                  <button
+                    onClick={() => onSelectSegment(seg)}
+                    className="flex-1 flex items-center gap-1.5 text-gray-300 text-left min-w-0"
+                  >
                     <svg className="w-3 h-3 shrink-0" fill="none" stroke="#93C5FD" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                         d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 10-8 0v4h8z" />
                     </svg>
-                    {formatDateTime(seg.started_at)}
-                  </span>
-                  {isSelected && <span className="shrink-0" style={{ color: '#FFB800' }}>Playing</span>}
-                </button>
+                    <div className="min-w-0">
+                      <div>{formatDateTime(seg.started_at)}</div>
+                      {!isEditing && seg.description && (
+                        <div className="text-gray-500 truncate">{seg.description}</div>
+                      )}
+                    </div>
+                  </button>
+                  {isSelected && !isEditing && <span className="shrink-0" style={{ color: '#FFB800' }}>Playing</span>}
+                  {!isEditing && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); startEditingDesc(seg) }}
+                      className="shrink-0 p-1 rounded hover:bg-[#484848] text-gray-500 hover:text-gray-300 transition-colors"
+                      title={seg.description ? 'Edit description' : 'Add description'}
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                  )}
+                  {isEditing && (
+                    <div className="flex-1 flex items-center gap-1.5 min-w-0" onClick={e => e.stopPropagation()}>
+                      <input
+                        autoFocus
+                        value={descDraft}
+                        onChange={e => setDescDraft(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') saveDesc(seg.id); if (e.key === 'Escape') cancelEditingDesc() }}
+                        maxLength={500}
+                        placeholder="What's in this recording?"
+                        className="flex-1 min-w-0 bg-[#1A1A1A] border border-[#484848] rounded px-2 py-1 text-xs text-white focus:outline-none"
+                      />
+                      <button
+                        onClick={() => saveDesc(seg.id)}
+                        disabled={savingDesc}
+                        className="shrink-0 px-2 py-1 rounded text-xs font-medium disabled:opacity-40"
+                        style={{ background: '#FFB800', color: '#151925' }}
+                      >Save</button>
+                      <button
+                        onClick={cancelEditingDesc}
+                        className="shrink-0 px-2 py-1 rounded text-xs text-gray-400 hover:text-gray-200"
+                      >Cancel</button>
+                    </div>
+                  )}
+                </div>
               )
             })}
           </div>

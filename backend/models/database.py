@@ -253,6 +253,7 @@ def init_db():
         "ALTER TABLE cameras ADD COLUMN night_mode TEXT NOT NULL DEFAULT 'off'",
         "ALTER TABLE continuous_segments ADD COLUMN locked INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE continuous_segments ADD COLUMN size_bytes INTEGER",
+        "ALTER TABLE continuous_segments ADD COLUMN description TEXT",
     ]:
         try:
             db.execute(migration)
@@ -295,6 +296,9 @@ def init_db():
         ('zones_enabled',            '0'),
         ('camera_health_alerts_enabled', '0'),
         ('continuous_recording_enabled', '0'),
+        ('recording_width',          '640'),
+        ('recording_height',         '360'),
+        ('recording_fps',            '5'),
     ]
     for key, value in defaults:
         db.execute(

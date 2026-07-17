@@ -12,16 +12,19 @@ SEGMENT_DURATION_SECS = 300  # 5 minutes per segment
 class SegmentWriter:
     """Writes one fixed-duration continuous-recording segment."""
 
-    def __init__(self, output_path: str, camera_id: int = 0):
+    def __init__(self, output_path: str, camera_id: int = 0,
+                 width: int = CLIP_WIDTH, height: int = CLIP_HEIGHT, fps: float = CLIP_FPS):
         self._path = output_path
         self.camera_id = camera_id
+        self._width = width
+        self._height = height
         self.started_at = time.time()
         self._closed = False
         self._lock = threading.Lock()
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         # mp4v, same as EventClipWriter — converted to H.264 after close for browser playback.
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        self._writer = cv2.VideoWriter(output_path, fourcc, CLIP_FPS, (CLIP_WIDTH, CLIP_HEIGHT))
+        self._writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
     def write_frame(self, frame_bgr):
         # A disable (set_continuous_enabled(False)) can call close() from a different
@@ -32,8 +35,8 @@ class SegmentWriter:
                 return
             try:
                 f = frame_bgr
-                if f.shape[:2] != (CLIP_HEIGHT, CLIP_WIDTH):
-                    f = cv2.resize(f, (CLIP_WIDTH, CLIP_HEIGHT))
+                if f.shape[:2] != (self._height, self._width):
+                    f = cv2.resize(f, (self._width, self._height))
                 self._writer.write(f)
             except Exception:
                 pass

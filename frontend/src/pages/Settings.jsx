@@ -1436,9 +1436,84 @@ function StorageTab() {
       <StorageLocationCard />
       <ExternalDevicesCard onDeviceChanged={triggerRefresh} />
       <StorageCard />
+      <RecordingQualityCard refreshKey={refreshKey} />
       <VideoClipsCard refreshKey={refreshKey} />
       <ContinuousRecordingCard refreshKey={refreshKey} />
     </div>
+  )
+}
+
+function RecordingQualityCard({ refreshKey = 0 }) {
+  const [s, setS] = useState(null)
+  const [saved, setSaved] = useState({})
+
+  const load = useCallback(() => {
+    settings.getAll().then(r => setS(r.data)).catch(() => {})
+  }, [])
+
+  useEffect(() => { load() }, [load, refreshKey])
+
+  const save = async (key, value) => {
+    try {
+      await settings.set(key, value)
+      setS(p => ({ ...p, [key]: String(value) }))
+      setSaved(p => ({ ...p, [key]: true }))
+      setTimeout(() => setSaved(p => ({ ...p, [key]: false })), 2000)
+    } catch {}
+  }
+
+  if (!s) return null
+  const width = s.recording_width ?? '640'
+  const height = s.recording_height ?? '360'
+  const fps = s.recording_fps ?? '5'
+  const res = `${width}x${height}`
+
+  return (
+    <Card title="Recording Quality">
+      <p className="text-xs text-gray-500 mb-4">
+        Resolution and frame rate for saved video — shared by event clips and continuous recording. Higher quality means larger files and more CPU spent encoding; this device is resource-constrained, so raise it gradually and watch storage/CPU afterward.
+      </p>
+
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 py-3 border-b border-[#3A3A3A]">
+        <div className="sm:w-40 shrink-0">
+          <p className="text-sm font-medium text-white">Resolution</p>
+        </div>
+        <div className="flex gap-1.5 flex-wrap">
+          {[
+            { label: '640×360', w: '640', h: '360' },
+            { label: '854×480', w: '854', h: '480' },
+            { label: '1280×720', w: '1280', h: '720' },
+          ].map(r => (
+            <button key={r.label}
+              onClick={() => { save('recording_width', r.w); save('recording_height', r.h) }}
+              className="px-3 py-1 rounded-md text-xs font-medium transition-opacity hover:opacity-80"
+              style={res === `${r.w}x${r.h}` ? { background: '#FFB800', color: '#151925' } : { background: '#3A3A3A', color: '#9CA3AF' }}
+            >{r.label}</button>
+          ))}
+          {(saved.recording_width || saved.recording_height) && <span className="text-xs text-green-400 self-center">Saved ✓</span>}
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 py-3">
+        <div className="sm:w-40 shrink-0">
+          <p className="text-sm font-medium text-white">Frame Rate</p>
+        </div>
+        <div className="flex gap-1.5 flex-wrap">
+          {['5', '10', '15'].map(f => (
+            <button key={f}
+              onClick={() => save('recording_fps', f)}
+              className="px-3 py-1 rounded-md text-xs font-medium transition-opacity hover:opacity-80"
+              style={fps === f ? { background: '#FFB800', color: '#151925' } : { background: '#3A3A3A', color: '#9CA3AF' }}
+            >{f} fps</button>
+          ))}
+          {saved.recording_fps && <span className="text-xs text-green-400 self-center">Saved ✓</span>}
+        </div>
+      </div>
+
+      <p className="text-xs text-gray-500 pt-3">
+        Applies to new clips/segments going forward — recordings already in progress keep their original quality.
+      </p>
+    </Card>
   )
 }
 
@@ -1472,7 +1547,7 @@ function ContinuousRecordingCard({ refreshKey = 0 }) {
   return (
     <Card title="Continuous Recording">
       <p className="text-xs text-gray-500 mb-4">
-        Always-on recording per camera (640×360, 5 fps, 5-minute segments) — not just around detected events. Same camera/time/detection overlay as clips. Requires external storage. Browse and play back recordings from each camera's <strong>Continuous</strong> panel on the Cameras page.
+        Always-on recording per camera ({s.recording_width ?? '640'}×{s.recording_height ?? '360'}, {s.recording_fps ?? '5'} fps, 5-minute segments — see Recording Quality above) — not just around detected events. Same camera/time/detection overlay as clips. Requires external storage. Browse and play back recordings from each camera's <strong>Continuous</strong> panel on the Cameras page.
       </p>
       <p className="text-xs text-yellow-500 mb-4">
         This runs constantly rather than only around events — expect meaningfully more disk usage than event clips alone. Segments are purged oldest-first ahead of event clips once storage crosses the threshold set below.
@@ -1564,7 +1639,7 @@ function VideoClipsCard({ refreshKey = 0 }) {
       <div className="flex items-center justify-between py-3 border-b border-[#3A3A3A]">
         <div>
           <p className="text-sm font-medium text-white">Enable clip recording</p>
-          <p className="text-xs text-gray-500 mt-0.5">Records a 640×360 MP4 with pre-roll for each detection event</p>
+          <p className="text-xs text-gray-500 mt-0.5">Records a {s.recording_width ?? '640'}×{s.recording_height ?? '360'} MP4 with pre-roll for each detection event — see Recording Quality above</p>
         </div>
         <button
           onClick={() => save('clips_enabled', clipsEnabled ? '0' : '1')}
