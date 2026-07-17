@@ -5,6 +5,7 @@ import Badge from '../components/Badge'
 import CameraLiveView, { OVERLAY_CATEGORIES, CATEGORY_STYLE, statusBadge } from '../components/CameraLiveView'
 import { cameras, detections as detectionsApi } from '../api/client'
 import { formatDateTime, getTimezone } from '../utils/dates'
+import { useDownloadProgress } from '../hooks/useDownloadProgress'
 
 const DETECTION_BADGE = {
   people:   { background: 'rgba(239,68,68,0.15)',  color: '#F87171' },
@@ -828,6 +829,7 @@ export default function CameraDetail() {
   const [selectedSegment, setSelectedSegment] = useState(null)
   const [videoUrl, setVideoUrl] = useState(null)
   const [videoLoading, setVideoLoading] = useState(false)
+  const { progress: videoProgress, onDownloadProgress: onVideoDownloadProgress, reset: resetVideoProgress } = useDownloadProgress()
   const [lockBusy, setLockBusy] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [actionError, setActionError] = useState('')
@@ -923,8 +925,9 @@ export default function CameraDetail() {
     // request — and skip the loading flash entirely if it already finished.
     const cached = prefetchRef.current.id === seg.id ? prefetchRef.current : null
     setVideoLoading(!cached?.url)
+    resetVideoProgress()
     try {
-      const url = cached ? await cached.promise : await detectionsApi.continuousVideo(seg.id).then(r => URL.createObjectURL(r.data))
+      const url = cached ? await cached.promise : await detectionsApi.continuousVideo(seg.id, { onDownloadProgress: onVideoDownloadProgress }).then(r => URL.createObjectURL(r.data))
       // Clicking a second segment before the first's fetch resolves must not let
       // the stale response overwrite the newer selection's video. A cached
       // (prefetched) URL is shared with whichever call actually wins — e.g.
@@ -1047,7 +1050,7 @@ export default function CameraDetail() {
             cam={cam}
             onEnabledChange={reload}
             onStatusChange={setStatus}
-            playback={selectedSegment ? { loading: videoLoading, url: videoUrl, label: formatDateTime(selectedSegment.started_at) } : null}
+            playback={selectedSegment ? { loading: videoLoading, url: videoUrl, progress: videoProgress, label: formatDateTime(selectedSegment.started_at) } : null}
             onGoLive={goLive}
             onPlaybackEnded={handlePlaybackEnded}
           />

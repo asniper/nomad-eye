@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cameras } from '../api/client'
+import VideoLoadProgress from './VideoLoadProgress'
 
 export const OVERLAY_CATEGORIES = ['people', 'vehicles', 'animals', 'faces', 'other']
 export const CATEGORY_STYLE = {
@@ -357,9 +358,7 @@ export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, p
         {playback ? (
           <>
             {playback.loading ? (
-              <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-sm">
-                Loading recording…
-              </div>
+              <VideoLoadProgress progress={playback.progress} fill />
             ) : playback.url ? (
               <video
                 src={playback.url}

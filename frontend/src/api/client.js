@@ -72,7 +72,7 @@ export const detections = {
   storage: () => api.get('/detections/storage'),
   purge: (category, images_only) => api.delete('/detections/purge', { data: { category, images_only } }),
   deleteEvent: (event_id) => api.delete(`/detections/events/${event_id}`),
-  clip: (event_id) => api.get(`/detections/events/${event_id}/clip`, { responseType: 'blob' }),
+  clip: (event_id, config) => api.get(`/detections/events/${event_id}/clip`, { responseType: 'blob', ...config }),
   deleteClip: (event_id) => api.delete(`/detections/events/${event_id}/clip`),
   clipsStorage: () => api.get('/detections/clips/storage'),
   purgeClips: () => api.delete('/detections/clips'),
@@ -83,7 +83,7 @@ export const detections = {
     api.get('/detections/continuous/summary', { params: { camera_id: cameraId } }),
   listLockedContinuous: (cameraId) =>
     api.get('/detections/continuous/locked', { params: { camera_id: cameraId } }),
-  continuousVideo: (segmentId) => api.get(`/detections/continuous/${segmentId}/video`, { responseType: 'blob' }),
+  continuousVideo: (segmentId, config) => api.get(`/detections/continuous/${segmentId}/video`, { responseType: 'blob', ...config }),
   deleteContinuous: (segmentId) => api.delete(`/detections/continuous/${segmentId}`),
   lockContinuous: (segmentId, locked) => api.post(`/detections/continuous/${segmentId}/lock`, { locked }),
 }

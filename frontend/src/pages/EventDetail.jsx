@@ -1,8 +1,10 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import Card from '../components/Card'
+import VideoLoadProgress from '../components/VideoLoadProgress'
 import { detections, cameras } from '../api/client'
 import { formatDateTime } from '../utils/dates'
+import { useDownloadProgress } from '../hooks/useDownloadProgress'
 
 const CATEGORY_STYLE = {
   people:   { background: 'rgba(239,68,68,0.15)',   color: '#F87171' },
@@ -145,10 +147,12 @@ function ClipSection({ eventId, onDeleted }) {
   const [loading, setLoading] = useState(true)
   const [deletingClip, setDeletingClip] = useState(false)
   const urlRef = useRef(null)
+  const { progress, onDownloadProgress, reset } = useDownloadProgress()
 
   useEffect(() => {
     let active = true
-    detections.clip(eventId)
+    reset()
+    detections.clip(eventId, { onDownloadProgress })
       .then(r => {
         if (!active) return
         const url = URL.createObjectURL(r.data)
@@ -161,7 +165,7 @@ function ClipSection({ eventId, onDeleted }) {
       active = false
       if (urlRef.current) URL.revokeObjectURL(urlRef.current)
     }
-  }, [eventId])
+  }, [eventId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDownload = () => {
     if (!src) return
@@ -214,7 +218,7 @@ function ClipSection({ eventId, onDeleted }) {
         </div>
       </div>
       {loading ? (
-        <div className="w-full aspect-video bg-[#3A3A3A] rounded-lg animate-pulse" />
+        <VideoLoadProgress progress={progress} />
       ) : (
         <video
           src={src}
