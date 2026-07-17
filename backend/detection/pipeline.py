@@ -8,7 +8,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from camera.capture import CameraCapture
 from camera.motion import MotionDetector
-from detection.detector import ObjectDetector, create_detector
+from detection.detector import ObjectDetector, create_detector, _classify_open_vocab, _compute_iou
 from detection.face_recognizer import FaceRecognizer
 from detection.overlay import draw_boxes, draw_info_bar, format_camera_time_str
 from notifications.dispatcher import dispatch_notification, dispatch_camera_health_notification
@@ -54,6 +54,41 @@ def _detect_with_timeout(detector, frame):
     def _worker():
         try:
             result[0] = detector.detect(frame)
+        except Exception:
+            result[0] = []
+        finally:
+            _yolo_in_flight.clear()
+            done.set()
+
+    threading.Thread(target=_worker, daemon=True).start()
+    if done.wait(timeout=YOLO_TIMEOUT_SECS):
+        return result[0] or [], False
+    return [], True  # timed out
+
+REANALYZE_MAX_WAIT_SECS = 30.0  # manual diagnostic call: wait for live detection to finish, don't just skip
+
+def _detect_raw_with_timeout(detector, frame, conf_floor=0.02):
+    """Like _detect_with_timeout, but for a rare manual diagnostic call rather
+    than a per-frame camera loop: waits for any in-flight live inference to
+    finish instead of skipping, and calls detect_debug (unfiltered by the
+    configured confidence thresholds) instead of detect."""
+    waited = 0.0
+    while True:
+        with _yolo_call_lock:
+            if not _yolo_in_flight.is_set():
+                _yolo_in_flight.set()
+                break
+        if waited >= REANALYZE_MAX_WAIT_SECS:
+            return [], True  # gave up waiting for live detection to free up
+        time.sleep(0.1)
+        waited += 0.1
+
+    result = [None]
+    done = threading.Event()
+
+    def _worker():
+        try:
+            result[0] = detector.detect_debug(frame, conf_floor=conf_floor)
         except Exception:
             result[0] = []
         finally:
@@ -272,6 +307,64 @@ class DetectionPipeline:
                     return None
             self._object_detector = det
             return det
+
+    def reanalyze_frame(self, frame_bgr, bbox: tuple, label: str) -> dict:
+        """Diagnostic re-run for a single frame from a locked recording: reports
+        what the currently active model actually scored near a user-drawn box,
+        both on the full frame and on a cropped+upscaled version (the same trick
+        already used for face-detection retries in _run_camera). Serializes
+        behind the same single-inference lock as live camera detection — this is
+        a rare, manual, one-shot call, not a per-frame loop, so it's safe (and
+        correct) to wait for a live inference to finish rather than skip."""
+        detector = self._ensure_detector()
+        if detector is None:
+            return {"error": "No detection model loaded"}
+
+        def _best_overlap(dets, ref_bbox, min_iou=0.1):
+            best, best_iou = None, min_iou
+            for d in dets:
+                iou = _compute_iou(d.bbox, ref_bbox)
+                if iou >= best_iou:
+                    best, best_iou = d, iou
+            return best
+
+        def _det_dict(d):
+            return {"label": d.label, "confidence": round(d.confidence, 3)} if d else None
+
+        x1, y1, x2, y2 = bbox
+        full_dets, full_timed_out = _detect_raw_with_timeout(detector, frame_bgr)
+        full_match = _best_overlap(full_dets, bbox) if not full_timed_out else None
+
+        h, w = frame_bgr.shape[:2]
+        pad_x, pad_y = int((x2 - x1) * 0.4), int((y2 - y1) * 0.4)
+        cx1, cy1 = max(0, x1 - pad_x), max(0, y1 - pad_y)
+        cx2, cy2 = min(w, x2 + pad_x), min(h, y2 + pad_y)
+        crop = frame_bgr[cy1:cy2, cx1:cx2]
+        crop_match = None
+        if crop.size > 0 and not full_timed_out:
+            longest = max(crop.shape[:2])
+            scale = max(1.0, 320 / longest)
+            if scale > 1.0:
+                crop = cv2.resize(crop, (int(crop.shape[1] * scale), int(crop.shape[0] * scale)),
+                                   interpolation=cv2.INTER_CUBIC)
+            crop_dets, crop_timed_out = _detect_raw_with_timeout(detector, crop)
+            if not crop_timed_out and crop_dets:
+                crop_match = max(crop_dets, key=lambda d: d.confidence)
+
+        best = full_match if (full_match and (not crop_match or full_match.confidence >= crop_match.confidence)) else crop_match
+        category = best.category if best else _classify_open_vocab(label)
+        current_threshold = detector._confidences.get(category)
+        suggested_threshold = round(max(0.05, best.confidence - 0.05), 2) if best else None
+
+        return {
+            "category": category,
+            "config_key": f"confidence_{category}",
+            "full_frame": _det_dict(full_match),
+            "cropped_upscaled": _det_dict(crop_match),
+            "current_threshold": current_threshold,
+            "suggested_threshold": suggested_threshold,
+            "timed_out": bool(full_timed_out),
+        }
 
     def reload_model(self, model_key: str, classes: list = None):
         """Hot-swap the detection model. Serialized against the lazy build under

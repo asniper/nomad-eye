@@ -1,5 +1,8 @@
+import base64
 import os
 import shutil
+import numpy as np
+import cv2
 from datetime import datetime, time as dtime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -14,6 +17,13 @@ import sqlite3
 
 router = APIRouter()
 cfg = get_settings()
+
+_pipeline = None
+
+
+def set_pipeline(pipeline):
+    global _pipeline
+    _pipeline = pipeline
 
 
 @router.get("/")
@@ -458,6 +468,41 @@ def set_continuous_description(
     if cur.rowcount == 0:
         raise HTTPException(status_code=404, detail="Segment not found")
     return {"id": segment_id, "description": text}
+
+
+class ReanalyzeBody(BaseModel):
+    image_base64: str  # data URL or raw base64 JPEG/PNG of a single frame
+    bbox: list[int]     # [x1, y1, x2, y2] in that frame's pixel coordinates
+    label: str          # what the user says is actually in the box, e.g. "bear"
+
+
+@router.post("/continuous/{segment_id}/reanalyze")
+def reanalyze_continuous_segment(segment_id: int, body: ReanalyzeBody, _=Depends(require_operator)):
+    """Manual diagnostic re-run against a single frame the user pulled from a
+    locked recording: reports what the currently active model actually scored
+    near the drawn box, on the full frame and on a cropped+upscaled version.
+    segment_id isn't touched here — it just scopes the action in the URL for
+    consistency with the rest of the continuous-recording API."""
+    if _pipeline is None:
+        raise HTTPException(status_code=503, detail="Detection pipeline not running")
+    if len(body.bbox) != 4:
+        raise HTTPException(status_code=400, detail="bbox must be [x1, y1, x2, y2]")
+    if not body.label.strip():
+        raise HTTPException(status_code=400, detail="label is required")
+
+    raw = body.image_base64.split(',', 1)[-1]  # strip a data: URL prefix if present
+    try:
+        img_bytes = base64.b64decode(raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail="image_base64 could not be decoded")
+    frame = cv2.imdecode(np.frombuffer(img_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(status_code=400, detail="image_base64 is not a valid image")
+
+    result = _pipeline.reanalyze_frame(frame, tuple(body.bbox), body.label.strip())
+    if "error" in result:
+        raise HTTPException(status_code=503, detail=result["error"])
+    return result
 
 
 @router.get("/continuous/{segment_id}/video")

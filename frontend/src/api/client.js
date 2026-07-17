@@ -87,6 +87,8 @@ export const detections = {
   deleteContinuous: (segmentId) => api.delete(`/detections/continuous/${segmentId}`),
   lockContinuous: (segmentId, locked) => api.post(`/detections/continuous/${segmentId}/lock`, { locked }),
   setContinuousDescription: (segmentId, description) => api.patch(`/detections/continuous/${segmentId}/description`, { description }),
+  reanalyzeContinuous: (segmentId, imageBase64, bbox, label) =>
+    api.post(`/detections/continuous/${segmentId}/reanalyze`, { image_base64: imageBase64, bbox, label }),
 }
 
 export const notifications = {

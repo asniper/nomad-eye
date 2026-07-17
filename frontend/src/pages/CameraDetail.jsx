@@ -3,6 +3,7 @@ import { useParams, useSearchParams, Link } from 'react-router-dom'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import CameraLiveView, { OVERLAY_CATEGORIES, CATEGORY_STYLE, statusBadge } from '../components/CameraLiveView'
+import ReanalyzeModal from '../components/ReanalyzeModal'
 import { cameras, detections as detectionsApi } from '../api/client'
 import { formatDateTime, getTimezone } from '../utils/dates'
 import { useDownloadProgress } from '../hooks/useDownloadProgress'
@@ -572,6 +573,8 @@ function ContinuousTab({ camId, selectedSegment, onSelectSegment, onGoLive, onNa
   const [editingDescId, setEditingDescId] = useState(null)
   const [descDraft, setDescDraft] = useState('')
   const [savingDesc, setSavingDesc] = useState(false)
+  const [reanalyzeSeg, setReanalyzeSeg] = useState(null)
+  const [reanalyzeUrl, setReanalyzeUrl] = useState(null)
   // If a segment is already selected when this mounts (e.g. the user switched
   // to another tab and back while a recording was playing), show that
   // segment's day instead of defaulting to today, so the timeline still
@@ -634,6 +637,24 @@ function ContinuousTab({ camId, selectedSegment, onSelectSegment, onGoLive, onNa
       setDescDraft('')
     } catch {}
     setSavingDesc(false)
+  }
+
+  // Fetches its own blob URL rather than reusing the shared player's — the
+  // Locked Recordings list can open this for any segment regardless of which
+  // one (if any) is currently selected/playing, and the modal owns its own
+  // video element independent of the main player's prefetch/auto-advance state.
+  const openReanalyze = async (seg) => {
+    try {
+      const r = await detectionsApi.continuousVideo(seg.id)
+      setReanalyzeUrl(URL.createObjectURL(r.data))
+      setReanalyzeSeg(seg)
+    } catch {}
+  }
+
+  const closeReanalyze = () => {
+    if (reanalyzeUrl) URL.revokeObjectURL(reanalyzeUrl)
+    setReanalyzeUrl(null)
+    setReanalyzeSeg(null)
   }
 
   useEffect(() => {
@@ -831,6 +852,18 @@ function ContinuousTab({ camId, selectedSegment, onSelectSegment, onGoLive, onNa
                   {isSelected && !isEditing && <span className="shrink-0" style={{ color: '#FFB800' }}>Playing</span>}
                   {!isEditing && (
                     <button
+                      onClick={(e) => { e.stopPropagation(); openReanalyze(seg) }}
+                      className="shrink-0 p-1 rounded hover:bg-[#484848] text-gray-500 hover:text-gray-300 transition-colors"
+                      title="Diagnose a missed detection in this recording"
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+                      </svg>
+                    </button>
+                  )}
+                  {!isEditing && (
+                    <button
                       onClick={(e) => { e.stopPropagation(); startEditingDesc(seg) }}
                       className="shrink-0 p-1 rounded hover:bg-[#484848] text-gray-500 hover:text-gray-300 transition-colors"
                       title={seg.description ? 'Edit description' : 'Add description'}
@@ -870,6 +903,10 @@ function ContinuousTab({ camId, selectedSegment, onSelectSegment, onGoLive, onNa
           </div>
         )}
       </Card>
+
+      {reanalyzeSeg && reanalyzeUrl && (
+        <ReanalyzeModal segmentId={reanalyzeSeg.id} videoUrl={reanalyzeUrl} onClose={closeReanalyze} />
+      )}
     </div>
   )
 }

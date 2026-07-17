@@ -232,6 +232,20 @@ class ObjectDetector:
             detections.append(Detection(label=label, category=category, confidence=confidence, bbox=(x1, y1, x2, y2)))
         return _apply_nms(detections)
 
+    def detect_debug(self, frame: np.ndarray, conf_floor: float = 0.02) -> List[Detection]:
+        """Diagnostic pass: every raw box above conf_floor, ignoring the
+        configured per-category thresholds — used to see what the model actually
+        scored on a miss, not just what currently passes the filter."""
+        results = self._model(frame, verbose=False, conf=conf_floor, imgsz=320)[0]
+        detections = []
+        for box in results.boxes:
+            label = results.names[int(box.cls)]
+            confidence = float(box.conf)
+            category = CATEGORIES.get(label, "other")
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            detections.append(Detection(label=label, category=category, confidence=confidence, bbox=(x1, y1, x2, y2)))
+        return _apply_nms(detections)
+
 
 class YOLOWorldDetector:
     def __init__(self, classes: list = None, confidences: dict = None):
@@ -263,6 +277,23 @@ class YOLOWorldDetector:
             category = _classify_open_vocab(label)
             if confidence < self._confidences.get(category, min_conf):
                 continue
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            detections.append(Detection(label=label, category=category, confidence=confidence, bbox=(x1, y1, x2, y2)))
+        return _apply_nms(detections)
+
+    def detect_debug(self, frame: np.ndarray, conf_floor: float = 0.02) -> List[Detection]:
+        """Diagnostic pass: every raw box above conf_floor, ignoring the
+        configured per-category thresholds — used to see what the model actually
+        scored on a miss, not just what currently passes the filter."""
+        results = self._model(frame, verbose=False, conf=conf_floor, imgsz=320)[0]
+        detections = []
+        for box in results.boxes:
+            cls_idx = int(box.cls)
+            if cls_idx >= len(self._classes):
+                continue
+            label = self._classes[cls_idx]
+            confidence = float(box.conf)
+            category = _classify_open_vocab(label)
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             detections.append(Detection(label=label, category=category, confidence=confidence, bbox=(x1, y1, x2, y2)))
         return _apply_nms(detections)
@@ -332,6 +363,25 @@ class MegaDetectorDetector:
             ))
         return _apply_nms(detections)
 
+    def detect_debug(self, frame: np.ndarray, conf_floor: float = 0.02) -> List[Detection]:
+        """Diagnostic pass: every raw box above conf_floor, ignoring the
+        configured per-category thresholds — used to see what the model actually
+        scored on a miss, not just what currently passes the filter."""
+        self._model.conf = conf_floor
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self._model(frame_rgb, size=640)
+        names = results.names
+        detections = []
+        for row in results.xyxy[0].tolist():
+            x1, y1, x2, y2, confidence, cls_idx = row
+            label = names[int(cls_idx)]
+            category = self._CATEGORY_MAP.get(label, 'other')
+            detections.append(Detection(
+                label=label, category=category, confidence=float(confidence),
+                bbox=(int(x1), int(y1), int(x2), int(y2)),
+            ))
+        return _apply_nms(detections)
+
 
 class OWLv2Detector:
     def __init__(self, classes: list = None, confidences: dict = None):
@@ -383,6 +433,35 @@ class OWLv2Detector:
             detections.append(Detection(label=label, category=category, confidence=confidence, bbox=(x1, y1, x2, y2)))
         return _apply_nms(detections)
 
+    def detect_debug(self, frame: np.ndarray, conf_floor: float = 0.02) -> List[Detection]:
+        """Diagnostic pass: every raw box above conf_floor, ignoring the
+        configured per-category thresholds — used to see what the model actually
+        scored on a miss, not just what currently passes the filter."""
+        from PIL import Image
+        import torch
+        h, w = frame.shape[:2]
+        image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        inputs = self._processor(text=self._texts, images=image, return_tensors="pt")
+        with torch.no_grad():
+            outputs = self._owlmodel(**inputs)
+        target_sizes = torch.Tensor([[h, w]])
+        results = self._processor.post_process_object_detection(
+            outputs=outputs, threshold=conf_floor, target_sizes=target_sizes
+        )[0]
+        detections = []
+        for box, score, label_idx in zip(
+            results["boxes"].tolist(),
+            results["scores"].tolist(),
+            results["labels"].tolist(),
+        ):
+            if label_idx >= len(self._classes):
+                continue
+            label = self._classes[label_idx]
+            category = _classify_open_vocab(label)
+            x1, y1, x2, y2 = map(int, box)
+            detections.append(Detection(label=label, category=category, confidence=float(score), bbox=(x1, y1, x2, y2)))
+        return _apply_nms(detections)
+
 
 class GroundingDINODetector:
     def __init__(self, classes: list = None, confidences: dict = None):
@@ -432,6 +511,36 @@ class GroundingDINODetector:
                 continue
             x1, y1, x2, y2 = map(int, box)
             detections.append(Detection(label=label_str, category=category, confidence=confidence, bbox=(x1, y1, x2, y2)))
+        return _apply_nms(detections)
+
+    def detect_debug(self, frame: np.ndarray, conf_floor: float = 0.02) -> List[Detection]:
+        """Diagnostic pass: every raw box above conf_floor, ignoring the
+        configured per-category thresholds — used to see what the model actually
+        scored on a miss, not just what currently passes the filter."""
+        from PIL import Image
+        import torch
+        h, w = frame.shape[:2]
+        image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        inputs = self._processor(images=image, text=self._text, return_tensors="pt")
+        with torch.no_grad():
+            outputs = self._dinomodel(**inputs)
+        results = self._processor.post_process_grounded_object_detection(
+            outputs,
+            inputs.input_ids,
+            threshold=conf_floor,
+            text_threshold=0.25,
+            target_sizes=[(h, w)],
+        )[0]
+        detections = []
+        for box, score, label in zip(
+            results["boxes"].tolist(),
+            results["scores"].tolist(),
+            results["labels"],
+        ):
+            label_str = label.strip().lower()
+            category = _classify_open_vocab(label_str)
+            x1, y1, x2, y2 = map(int, box)
+            detections.append(Detection(label=label_str, category=category, confidence=float(score), bbox=(x1, y1, x2, y2)))
         return _apply_nms(detections)
 
 

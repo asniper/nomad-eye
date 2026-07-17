@@ -166,6 +166,7 @@ async def lifespan(app: FastAPI):
     cam_router.set_pipeline(pipeline)
     settings.set_pipeline(pipeline)
     faces_router.set_pipeline(pipeline)
+    detections.set_pipeline(pipeline)
 
     queue_proc = QueueProcessor()
     queue_proc.start()
