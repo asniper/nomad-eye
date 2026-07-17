@@ -1,0 +1,7 @@
+[Unit]
+Description=Nomad Eye backend liveness check
+After=nomad-eye-backend.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/nomad-eye/deploy/nomad-eye-healthcheck.sh

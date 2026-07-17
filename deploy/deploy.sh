@@ -76,6 +76,22 @@ sudo systemctl daemon-reload
 sudo systemctl enable nomad-eye-backend nomad-eye-network
 sudo systemctl restart nomad-eye-backend nomad-eye-network
 
+# Liveness check timer — restarts the backend if it stops responding at all,
+# catching hangs the backend's own MemoryMax cap can't (a CPU-bound deadlock
+# with flat memory). Defense in depth, not a replacement for the memory cap.
+sudo chmod +x "$REPO_DIR/deploy/nomad-eye-healthcheck.sh"
+sudo cp "$REPO_DIR/deploy/nomad-eye-healthcheck.service" /etc/systemd/system/
+sudo cp "$REPO_DIR/deploy/nomad-eye-healthcheck.timer" /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now nomad-eye-healthcheck.timer
+
+# Hardware watchdog — resets the whole board if the system livelocks badly
+# enough that even PID1 stops getting scheduled. Works independent of network/
+# sshd/systemd-level recovery, so it's the layer below everything else here.
+sudo mkdir -p /etc/systemd/system.conf.d
+sudo cp "$REPO_DIR/deploy/watchdog.conf" /etc/systemd/system.conf.d/watchdog.conf
+sudo systemctl daemon-reexec
+
 # Install NetworkManager dispatcher script for captive-portal redirect during hotspot mode
 sudo cp "$REPO_DIR/deploy/99-nomadeye-captive" /etc/NetworkManager/dispatcher.d/99-nomadeye-captive
 sudo chmod +x /etc/NetworkManager/dispatcher.d/99-nomadeye-captive
