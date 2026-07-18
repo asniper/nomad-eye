@@ -5,7 +5,8 @@ import Badge from '../components/Badge'
 import CameraLiveView, { OVERLAY_CATEGORIES, CATEGORY_STYLE, statusBadge } from '../components/CameraLiveView'
 import ReanalyzeModal from '../components/ReanalyzeModal'
 import { cameras, detections as detectionsApi } from '../api/client'
-import { formatDateTime, getTimezone } from '../utils/dates'
+import { formatDateTime, getTimezone, zonedTimeToUtcIso } from '../utils/dates'
+import { useConfirm } from '../context/ConfirmContext'
 
 const DETECTION_BADGE = {
   people:   { background: 'rgba(239,68,68,0.15)',  color: '#F87171' },
@@ -73,6 +74,7 @@ function AdjustSlider({ label, min, max, step, value, onChange, format }) {
 }
 
 function ZoneEditor({ camId }) {
+  const confirm = useConfirm()
   const [imgUrl, setImgUrl] = useState(null)
   const [zones, setZones] = useState([])
   const [loading, setLoading] = useState(true)
@@ -832,7 +834,7 @@ export default function CameraDetail() {
     setGotoLoading(true)
     setGotoError('')
     try {
-      const atIso = new Date(gotoValue).toISOString()
+      const atIso = zonedTimeToUtcIso(gotoValue, tz)
       const r = await detectionsApi.findContinuous(cam.id, atIso)
       if (!r.data.found) {
         setGotoError("No recording exists for that date/time — it may never have been recorded, or has since been purged.")
