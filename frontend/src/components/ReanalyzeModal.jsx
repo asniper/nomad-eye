@@ -39,9 +39,10 @@ export default function ReanalyzeModal({ segmentId, videoUrl, onClose }) {
     const rect = canvas.getBoundingClientRect()
     const scaleX = canvas.width / rect.width
     const scaleY = canvas.height / rect.height
+    const point = e.touches?.[0] || e.changedTouches?.[0] || e
     return {
-      x: Math.round((e.clientX - rect.left) * scaleX),
-      y: Math.round((e.clientY - rect.top) * scaleY),
+      x: Math.round((point.clientX - rect.left) * scaleX),
+      y: Math.round((point.clientY - rect.top) * scaleY),
     }
   }
 
@@ -68,10 +69,10 @@ export default function ReanalyzeModal({ segmentId, videoUrl, onClose }) {
     redraw(null)
   }
 
-  const handleMouseDown = (e) => {
+  const startDrawing = (e) => {
     drawingRef.current = nativePoint(e)
   }
-  const handleMouseMove = (e) => {
+  const continueDrawing = (e) => {
     if (!drawingRef.current) return
     const p = nativePoint(e)
     const start = drawingRef.current
@@ -81,7 +82,7 @@ export default function ReanalyzeModal({ segmentId, videoUrl, onClose }) {
     }
     redraw(live)
   }
-  const handleMouseUp = (e) => {
+  const finishDrawing = (e) => {
     if (!drawingRef.current) return
     const p = nativePoint(e)
     const start = drawingRef.current
@@ -90,10 +91,17 @@ export default function ReanalyzeModal({ segmentId, videoUrl, onClose }) {
       x1: Math.min(start.x, p.x), y1: Math.min(start.y, p.y),
       x2: Math.max(start.x, p.x), y2: Math.max(start.y, p.y),
     }
-    if (finalBox.x2 - finalBox.x1 < 5 || finalBox.y2 - finalBox.y1 < 5) return // ignore accidental clicks
+    if (finalBox.x2 - finalBox.x1 < 5 || finalBox.y2 - finalBox.y1 < 5) return // ignore accidental clicks/taps
     setBox(finalBox)
     redraw(finalBox)
   }
+
+  // Touch variants prevent default so dragging a box doesn't also scroll/zoom
+  // the page underneath — mobile Safari/Chrome treat an un-prevented touchmove
+  // on a canvas as a scroll gesture by default.
+  const handleTouchStart = (e) => { e.preventDefault(); startDrawing(e) }
+  const handleTouchMove = (e) => { e.preventDefault(); continueDrawing(e) }
+  const handleTouchEnd = (e) => { e.preventDefault(); finishDrawing(e) }
 
   const runReanalysis = async () => {
     if (!box || !label.trim()) return
@@ -175,9 +183,13 @@ export default function ReanalyzeModal({ segmentId, videoUrl, onClose }) {
               <canvas
                 ref={canvasRef}
                 className="w-full rounded-lg cursor-crosshair block"
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
+                style={{ touchAction: 'none' }}
+                onMouseDown={startDrawing}
+                onMouseMove={continueDrawing}
+                onMouseUp={finishDrawing}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
               />
             </div>
             <input
