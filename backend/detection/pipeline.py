@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import os
 import time
 import uuid
 import threading
@@ -17,7 +18,6 @@ from storage.manager import get_active_images_dir, get_active_clips_dir
 from detection.clip_writer import ClipBuffer, EventClipWriter, CLIP_WIDTH, CLIP_HEIGHT, CLIP_FPS
 from detection.continuous_recorder import SegmentWriter
 import sqlite3
-import shutil as _shutil
 
 cfg = get_settings()
 
@@ -728,8 +728,16 @@ class DetectionPipeline:
             def _over():
                 if purge_mode == 'pct':
                     try:
-                        u = _shutil.disk_usage(clips_dir)
-                        return (u.used / u.total * 100) > threshold
+                        # Not shutil.disk_usage() — it computes free space from
+                        # statvfs's f_bfree, which includes ext4's reserved-for-root
+                        # block pool (typically 5%). nomadeye is unprivileged and can
+                        # never write into that reserve, so f_bfree-based usage reads
+                        # as under 100% (e.g. ~95%) right up until every write is
+                        # already failing with ENOSPC. f_bavail excludes the reserve —
+                        # it's what this process can actually still write into.
+                        st = os.statvfs(clips_dir)
+                        used_pct = (1 - st.f_bavail / st.f_blocks) * 100 if st.f_blocks else 0
+                        return used_pct > threshold
                     except Exception:
                         return False
                 else:
