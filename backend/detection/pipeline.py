@@ -651,6 +651,15 @@ class DetectionPipeline:
             self._rotate_continuous_segment(camera_id)
 
     def _start_continuous_segment(self, camera_id: int, clips_dir: str):
+        # Purge here too, not just after a segment finishes — if the disk is
+        # already full, every write fails, close() discards the undersized
+        # result, and the post-write purge in _finalize_continuous_segment
+        # never runs at all. Checking before opening a new writer means a full
+        # disk gets a chance to free up instead of staying wedged forever.
+        try:
+            self._auto_purge_clips()
+        except Exception:
+            pass
         try:
             seg_dir = Path(clips_dir) / 'continuous' / f'cam{camera_id}'
             ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
@@ -1270,6 +1279,13 @@ class DetectionPipeline:
                         _cid = cam.camera_id
                         _w, _h, _fps = self._recording_width, self._recording_height, self._recording_fps
                         def _mk_writer(eid=_eid, cp=clip_path, pr=pre_roll, cid=_cid, w=_w, h=_h, fps=_fps):
+                            # Same deadlock risk as continuous segments: if the disk is
+                            # already full, this write fails, close() discards the
+                            # undersized clip, and the post-write purge never runs.
+                            try:
+                                self._auto_purge_clips()
+                            except Exception:
+                                pass
                             try:
                                 w_ = EventClipWriter(cp, pr, camera_id=cid, width=w, height=h, fps=fps)
                                 with self._clip_lock:
