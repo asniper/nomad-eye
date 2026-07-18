@@ -90,6 +90,8 @@ export const detections = {
     api.get('/detections/continuous', { params: { camera_id: cameraId, date, tz } }),
   continuousSummary: (cameraId) =>
     api.get('/detections/continuous/summary', { params: { camera_id: cameraId } }),
+  findContinuous: (cameraId, atIso) =>
+    api.get('/detections/continuous/find', { params: { camera_id: cameraId, at: atIso } }),
   listLockedContinuous: (cameraId) =>
     api.get('/detections/continuous/locked', { params: { camera_id: cameraId } }),
   continuousStreamUrl: (segmentId) => withToken(`/api/detections/continuous/${segmentId}/video`),

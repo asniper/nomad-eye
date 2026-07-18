@@ -559,35 +559,56 @@ function safeTz(tz) {
 
 const SEGMENT_MINUTES = 5
 
-// The actual <video> and the segment action bar (Prev/Next/Lock/Download/
-// Delete) live in CameraDetail, right under the shared player — this tab
-// just owns the day/segment list and the Locked Recordings list, and reports
-// what "next"/"prev" mean via advanceRef/prevRef/onNavChange, and reacts to
-// lock/delete outcomes via syncRef so its own lists stay in sync regardless
-// of which component actually issued the request.
-function ContinuousTab({ camId, selectedSegment, onSelectSegment, onGoLive, onNavChange, advanceRef, prevRef, syncRef }) {
+// ---------------------------------------------------------------------------
+
+export default function CameraDetail() {
+  const { cameraId } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const rawTab = searchParams.get('tab')
+  const tab = TABS.some(t => t.key === rawTab) ? rawTab : 'continuous'
+
+  const [cam, setCam] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
+  const [name, setName] = useState('')
+  const [editingName, setEditingName] = useState(false)
+  const [status, setStatus] = useState({ connected: false, reloading: false, fps: 0 })
   const tz = safeTz(getTimezone())
+
+  // Playback state, the day-timeline, and the goto-date/time lookup all live
+  // here rather than in a tab-scoped child — the timeline (and the shared
+  // player above it) needs to stay visible and usable from any tab, not just
+  // while the Continuous tab happens to be selected.
+  const [selectedSegment, setSelectedSegment] = useState(null)
+  const [playbackError, setPlaybackError] = useState(false)
+  const [lockBusy, setLockBusy] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const videoCardRef = useRef(null)
+  const liveViewRef = useRef(null)
+  const selectedSegmentRef = useRef(null)
+  useEffect(() => { selectedSegmentRef.current = selectedSegment }, [selectedSegment])
+
   const [summary, setSummary] = useState(null)
+  const [dateStr, setDateStr] = useState(() => todayStr(tz))
+  const [segments, setSegments] = useState([])
+  const [dayLoading, setDayLoading] = useState(true)
+  const [dayError, setDayError] = useState('')
+  const [nowMinutes, setNowMinutes] = useState(() => localMinutesOfDay(new Date().toISOString(), tz))
+  const isMountRef = useRef(true)
+  const dayRequestRef = useRef(0)
+
+  const [gotoValue, setGotoValue] = useState('')
+  const [gotoError, setGotoError] = useState('')
+  const [gotoLoading, setGotoLoading] = useState(false)
+
   const [lockedSegments, setLockedSegments] = useState([])
   const [editingDescId, setEditingDescId] = useState(null)
   const [descDraft, setDescDraft] = useState('')
   const [savingDesc, setSavingDesc] = useState(false)
   const [reanalyzeSeg, setReanalyzeSeg] = useState(null)
   const [reanalyzeUrl, setReanalyzeUrl] = useState(null)
-  // If a segment is already selected when this mounts (e.g. the user switched
-  // to another tab and back while a recording was playing), show that
-  // segment's day instead of defaulting to today, so the timeline still
-  // highlights it instead of looking like nothing is selected.
-  const [dateStr, setDateStr] = useState(() =>
-    selectedSegment ? new Date(selectedSegment.started_at).toLocaleDateString('en-CA', { timeZone: tz }) : todayStr(tz)
-  )
-  const [segments, setSegments] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [nowMinutes, setNowMinutes] = useState(() => localMinutesOfDay(new Date().toISOString(), tz))
-  const isMountRef = useRef(true)
   const lockedRequestRef = useRef(0)
-  const dayRequestRef = useRef(0)
 
   const isToday = dateStr === todayStr(tz)
 
@@ -598,24 +619,179 @@ function ContinuousTab({ camId, selectedSegment, onSelectSegment, onGoLive, onNa
 
   // "Next"/"Prev" and auto-advance only make sense within the currently
   // loaded day's list — a segment selected from the Locked Recordings section
-  // below (which can be from any day) won't be found here, and next/prev
-  // simply have nothing to offer for it, same as the disabled-button state.
+  // or a goto lookup (which can land on any day) won't be found here, and
+  // next/prev simply have nothing to offer for it, same as the disabled state.
   const selectedIndex = selectedSegment ? segmentsWithMinutes.findIndex(s => s.id === selectedSegment.id) : -1
   const nextSegment = selectedIndex >= 0 ? segmentsWithMinutes[selectedIndex + 1] || null : null
   const prevSegment = selectedIndex > 0 ? segmentsWithMinutes[selectedIndex - 1] : null
+  const advanceRef = useRef(null)
+  const prevRef = useRef(null)
+  const handlePlaybackEnded = useCallback(() => { advanceRef.current?.() }, [])
+
+  // Streamed directly via <video src> (token in the query string — see
+  // withToken in api/client.js), not fetched as a blob — the browser handles
+  // buffering/range requests/seeking natively, so there's no fetch to await,
+  // no prefetch-ahead-of-time to manage, and no object URL lifecycle to track.
+  const videoUrl = selectedSegment ? detectionsApi.continuousStreamUrl(selectedSegment.id) : null
+
+  const reload = useCallback(() => {
+    return cameras.list().then(r => {
+      const found = r.data.find(c => c.id === Number(cameraId))
+      if (!found) { setNotFound(true); return }
+      setNotFound(false)
+      setCam(found)
+      setName(found.name || '')
+    }).catch(() => setNotFound(true))
+  }, [cameraId])
+
+  useEffect(() => { reload().finally(() => setLoading(false)) }, [reload])
+
+  const goLive = useCallback(() => {
+    setSelectedSegment(null)
+    setPlaybackError(false)
+  }, [])
+
+  // This component doesn't remount across /cameras/:id navigation (same route,
+  // just a changed param), so playback state from the previous camera has to
+  // be explicitly cleared rather than relying on fresh initial state.
+  useEffect(() => { goLive() }, [cameraId, goLive])
+
+  const selectSegment = useCallback((seg, { scrollIntoView = true, switchTab = false } = {}) => {
+    setSelectedSegment(seg)
+    setPlaybackError(false)
+    // The timeline (and goto) are visible from any tab now — switch to
+    // Continuous so the day list/Locked Recordings context is actually
+    // visible too, matching what got clicked.
+    if (switchTab) setSearchParams({})
+    // Skip the scroll for auto-advance (video ended naturally) — the user is
+    // already looking at the player, so yanking scroll position back to it
+    // every ~5 minutes as segments roll over would just be annoying. Explicit
+    // selections (timeline, locked list, Next/Prev, goto) still snap to it.
+    if (scrollIntoView) videoCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [setSearchParams])
 
   useEffect(() => {
-    detectionsApi.continuousSummary(camId).then(r => setSummary(r.data)).catch(() => {})
-  }, [camId])
+    advanceRef.current = nextSegment ? () => selectSegment(nextSegment, { scrollIntoView: false }) : null
+    prevRef.current = prevSegment ? () => selectSegment(prevSegment, { scrollIntoView: false }) : null
+  }, [nextSegment, prevSegment, selectSegment])
+
+  // Keeps the timeline's day view pointed at whatever's actually selected —
+  // covers Locked Recordings (any day) and goto (any day) landing on a
+  // segment outside the day currently shown.
+  useEffect(() => {
+    if (!selectedSegment) return
+    const segDay = new Date(selectedSegment.started_at).toLocaleDateString('en-CA', { timeZone: tz })
+    setDateStr(prev => prev === segDay ? prev : segDay)
+  }, [selectedSegment, tz])
+
+  const toggleLock = useCallback(async () => {
+    const seg = selectedSegment
+    if (!seg) return
+    setLockBusy(true)
+    setActionError('')
+    const next = !seg.locked
+    try {
+      await detectionsApi.lockContinuous(seg.id, next)
+      // Only apply if still the active selection — the user may have picked
+      // something else while this request was in flight.
+      if (selectedSegmentRef.current?.id === seg.id) {
+        setSelectedSegment(prev => prev ? { ...prev, locked: next } : prev)
+      }
+      setSegments(prev => prev.map(s => s.id === seg.id ? { ...s, locked: next } : s))
+      loadLocked()
+    } catch {
+      setActionError('Failed to update lock.')
+    } finally {
+      setLockBusy(false)
+    }
+  }, [selectedSegment]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const deleteSegment = useCallback(async () => {
+    const seg = selectedSegment
+    if (!seg) return
+    const msg = seg.locked
+      ? 'This recording is locked. Delete it anyway?'
+      : 'Delete this recording?'
+    if (!window.confirm(msg)) return
+    setDeleteBusy(true)
+    setActionError('')
+    try {
+      await detectionsApi.deleteContinuous(seg.id)
+      setSegments(prev => prev.filter(s => s.id !== seg.id))
+      if (cam) detectionsApi.continuousSummary(cam.id).then(r => setSummary(r.data)).catch(() => {})
+      loadLocked()
+      if (selectedSegmentRef.current?.id === seg.id) goLive()
+    } catch {
+      setActionError('Failed to delete recording.')
+    } finally {
+      setDeleteBusy(false)
+    }
+  }, [selectedSegment, goLive, cam]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const downloadSegment = () => {
+    if (!videoUrl || !selectedSegment) return
+    const a = document.createElement('a')
+    a.href = videoUrl
+    a.download = `continuous-cam${cam?.id}-${selectedSegment.id}.mp4`
+    a.click()
+  }
+
+  const saveName = async () => {
+    setEditingName(false)
+    const trimmed = name.trim()
+    if (cam && trimmed !== cam.name) {
+      await cameras.setName(cam.id, trimmed).catch(() => {})
+      setCam(prev => ({ ...prev, name: trimmed }))
+    }
+  }
+
+  useEffect(() => {
+    if (!cam) return
+    detectionsApi.continuousSummary(cam.id).then(r => setSummary(r.data)).catch(() => {})
+  }, [cam])
 
   const loadLocked = useCallback(() => {
+    if (!cam) return
     const requestId = ++lockedRequestRef.current
-    detectionsApi.listLockedContinuous(camId)
+    detectionsApi.listLockedContinuous(cam.id)
       .then(r => { if (requestId === lockedRequestRef.current) setLockedSegments(r.data) })
       .catch(() => {})
-  }, [camId])
+  }, [cam])
 
   useEffect(() => { loadLocked() }, [loadLocked])
+
+  useEffect(() => {
+    if (!isToday) return
+    const t = setInterval(() => setNowMinutes(localMinutesOfDay(new Date().toISOString(), tz)), 30000)
+    return () => clearInterval(t)
+  }, [isToday, tz])
+
+  const loadDay = useCallback(() => {
+    if (!cam) return
+    setDayLoading(true)
+    setDayError('')
+    const requestId = ++dayRequestRef.current
+    detectionsApi.listContinuous(cam.id, dateStr, tz)
+      // The API returns SQLite's raw 0/1 for `locked` — normalize to a real
+      // boolean here so every consumer (render, toggle, timeline color) can
+      // trust it, instead of each one needing its own truthiness workaround.
+      .then(r => {
+        // Rapid Prev/Next clicks can resolve out of order — only apply the
+        // response that matches the day currently being requested.
+        if (requestId === dayRequestRef.current) setSegments(r.data.map(s => ({ ...s, locked: !!s.locked })))
+      })
+      .catch(() => { if (requestId === dayRequestRef.current) setDayError('Failed to load recordings for this day.') })
+      .finally(() => { if (requestId === dayRequestRef.current) setDayLoading(false) })
+  }, [cam, dateStr, tz])
+
+  useEffect(() => {
+    loadDay()
+    // Changing the day (Prev/Next/Jump-to-today) should drop back to live —
+    // but not on the very first load, or every page load would immediately
+    // "go live" despite selectedSegment already being null at that point.
+    if (!isMountRef.current) goLive()
+    isMountRef.current = false
+  }, [loadDay]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const startEditingDesc = (seg) => {
     setEditingDescId(seg.id)
@@ -651,68 +827,31 @@ function ContinuousTab({ camId, selectedSegment, onSelectSegment, onGoLive, onNa
     setReanalyzeSeg(null)
   }
 
-  useEffect(() => {
-    advanceRef.current = nextSegment ? () => onSelectSegment(nextSegment, { scrollIntoView: false }) : null
-    prevRef.current = prevSegment ? () => onSelectSegment(prevSegment, { scrollIntoView: false }) : null
-    return () => { advanceRef.current = null; prevRef.current = null }
-  }, [nextSegment, prevSegment, onSelectSegment, advanceRef, prevRef])
-
-  useEffect(() => {
-    onNavChange({ hasNext: !!nextSegment, hasPrev: !!prevSegment })
-  }, [nextSegment, prevSegment, onNavChange])
-
-  useEffect(() => {
-    syncRef.current = {
-      onLockChanged: (id, locked) => {
-        setSegments(prev => prev.map(s => s.id === id ? { ...s, locked } : s))
-        loadLocked()
-      },
-      onDeleted: (id) => {
-        setSegments(prev => prev.filter(s => s.id !== id))
-        detectionsApi.continuousSummary(camId).then(r => setSummary(r.data)).catch(() => {})
-        loadLocked()
-      },
+  const handleGoto = async () => {
+    if (!gotoValue || !cam) return
+    setGotoLoading(true)
+    setGotoError('')
+    try {
+      const atIso = new Date(gotoValue).toISOString()
+      const r = await detectionsApi.findContinuous(cam.id, atIso)
+      if (!r.data.found) {
+        setGotoError("No recording exists for that date/time — it may never have been recorded, or has since been purged.")
+      } else {
+        selectSegment({
+          id: r.data.segment_id,
+          started_at: r.data.started_at,
+          locked: r.data.locked,
+          description: r.data.description,
+        }, { switchTab: true })
+        const seekSeconds = r.data.offset_seconds
+        requestAnimationFrame(() => liveViewRef.current?.seekTo(seekSeconds))
+      }
+    } catch {
+      setGotoError('Lookup failed.')
+    } finally {
+      setGotoLoading(false)
     }
-    return () => { syncRef.current = null }
-  }, [camId, loadLocked, syncRef])
-
-  useEffect(() => {
-    if (!isToday) return
-    const t = setInterval(() => setNowMinutes(localMinutesOfDay(new Date().toISOString(), tz)), 30000)
-    return () => clearInterval(t)
-  }, [isToday, tz])
-
-  const loadDay = useCallback(() => {
-    setLoading(true)
-    setError('')
-    const requestId = ++dayRequestRef.current
-    detectionsApi.listContinuous(camId, dateStr, tz)
-      // The API returns SQLite's raw 0/1 for `locked` — normalize to a real
-      // boolean here so every consumer (render, toggle, timeline color) can
-      // trust it, instead of each one needing its own truthiness workaround.
-      .then(r => {
-        // Rapid Prev/Next clicks can resolve out of order — only apply the
-        // response that matches the day currently being requested.
-        if (requestId === dayRequestRef.current) setSegments(r.data.map(s => ({ ...s, locked: !!s.locked })))
-      })
-      .catch(() => { if (requestId === dayRequestRef.current) setError('Failed to load recordings for this day.') })
-      .finally(() => { if (requestId === dayRequestRef.current) setLoading(false) })
-  }, [camId, dateStr, tz])
-
-  useEffect(() => {
-    loadDay()
-    // ContinuousTab used to fully unmount/remount on every switch away from
-    // and back to the Continuous tab, which would re-run this effect and
-    // clear an active recording selection just from switching tabs and back.
-    // It now stays mounted (see the `hidden`-class wrapper below instead of a
-    // conditional render) specifically so auto-advance keeps working while
-    // another tab is active, but this guard is kept too in case that ever
-    // changes back — only clear the selection on an actual day change
-    // (Prev/Next/Jump-to-today) after the initial mount, not on the mount
-    // itself.
-    if (!isMountRef.current) onGoLive()
-    isMountRef.current = false
-  }, [loadDay]) // eslint-disable-line react-hooks/exhaustive-deps
+  }
 
   const oldestDateStr = summary?.oldest_started_at
     ? new Date(summary.oldest_started_at).toLocaleDateString('en-CA', { timeZone: tz })
@@ -723,323 +862,6 @@ function ContinuousTab({ camId, selectedSegment, onSelectSegment, onGoLive, onNa
   const approxDuration = approxMinutes >= 60
     ? `${Math.floor(approxMinutes / 60)}h ${approxMinutes % 60}m`
     : `${approxMinutes}m`
-
-  return (
-    <div className="space-y-4">
-      <Card>
-        <div className="flex flex-wrap gap-4 text-sm">
-          <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wider">Retained footage</p>
-            <p className="text-white font-medium">≈{approxDuration} · {summary?.segment_count ?? 0} segments</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wider">Storage used</p>
-            <p className="text-white font-medium">{formatBytes(summary?.total_bytes)}</p>
-          </div>
-          {summary?.oldest_started_at && (
-            <div>
-              <p className="text-xs text-gray-500 uppercase tracking-wider">Oldest recording</p>
-              <p className="text-white font-medium">{formatDateTime(summary.oldest_started_at)}</p>
-            </div>
-          )}
-        </div>
-      </Card>
-
-      <Card>
-        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={() => setDateStr(d => shiftDay(d, -1))}
-              disabled={atOldest}
-              className="px-2 py-1 rounded text-xs bg-[#3A3A3A] hover:bg-[#484848] text-white disabled:opacity-30 transition-colors"
-            >‹ Prev</button>
-            <span className="text-sm text-white font-medium min-w-[9rem] sm:min-w-[11rem] text-center">{formatDayLabel(dateStr)}</span>
-            <button
-              onClick={() => setDateStr(d => shiftDay(d, 1))}
-              disabled={isToday}
-              className="px-2 py-1 rounded text-xs bg-[#3A3A3A] hover:bg-[#484848] text-white disabled:opacity-30 transition-colors"
-            >Next ›</button>
-          </div>
-          {!isToday && (
-            <button onClick={() => setDateStr(todayStr(tz))} className="text-xs text-gray-500 hover:text-gray-300">
-              Jump to today
-            </button>
-          )}
-        </div>
-
-        {error && <p className="text-xs text-red-400 mb-2">{error}</p>}
-
-        {loading ? (
-          <div className="text-xs text-gray-600 py-8 text-center">Loading…</div>
-        ) : segments.length === 0 ? (
-          <div className="text-xs text-gray-600 py-8 text-center">
-            No recordings for this day. {!summary?.segment_count && 'Enable continuous recording in Settings → Storage if you want them.'}
-          </div>
-        ) : (
-          <div className="relative h-12 bg-[#111] rounded overflow-hidden select-none">
-            {segmentsWithMinutes.map(seg => {
-              const leftPct = (seg.startMin / 1440) * 100
-              const widthPct = (SEGMENT_MINUTES / 1440) * 100
-              const isSelected = selectedSegment?.id === seg.id
-              return (
-                <button
-                  key={seg.id}
-                  onClick={() => onSelectSegment(seg)}
-                  title={formatDateTime(seg.started_at)}
-                  className="absolute top-1 bottom-1 rounded-sm transition-colors"
-                  style={{
-                    left: `${leftPct}%`,
-                    width: `${widthPct}%`,
-                    minWidth: '4px',
-                    background: isSelected ? '#FFB800' : seg.locked ? '#93C5FD' : '#4c6e5d',
-                    outline: isSelected ? '2px solid #FFB800' : 'none',
-                  }}
-                />
-              )
-            })}
-            {isToday && (
-              <div
-                className="absolute top-0 bottom-0 w-0.5 animate-pulse"
-                style={{ left: `${(nowMinutes / 1440) * 100}%`, background: '#F87171' }}
-                title="Now — the current segment isn't finalized yet"
-              />
-            )}
-          </div>
-        )}
-        <div className="flex justify-between text-[10px] text-gray-600 mt-1 px-0.5">
-          <span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span>
-        </div>
-      </Card>
-
-      <Card>
-        <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Locked Recordings</p>
-        {lockedSegments.length === 0 ? (
-          <p className="text-xs text-gray-600">
-            No locked recordings. Lock a segment above to protect it from auto-purge and keep it here for easy access, regardless of which day it's from.
-          </p>
-        ) : (
-          <div className="space-y-1">
-            {lockedSegments.map(seg => {
-              const isSelected = selectedSegment?.id === seg.id
-              const isEditing = editingDescId === seg.id
-              return (
-                <div
-                  key={seg.id}
-                  className="w-full flex items-center gap-2 text-xs px-2 py-1.5 rounded transition-colors hover:bg-[#3A3A3A]"
-                  style={isSelected ? { background: 'rgba(255,184,0,0.12)' } : {}}
-                >
-                  <button
-                    onClick={() => onSelectSegment(seg)}
-                    className="flex-1 flex items-center gap-1.5 text-gray-300 text-left min-w-0"
-                  >
-                    <svg className="w-3 h-3 shrink-0" fill="none" stroke="#93C5FD" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 10-8 0v4h8z" />
-                    </svg>
-                    <div className="min-w-0">
-                      <div>{formatDateTime(seg.started_at)}</div>
-                      {!isEditing && seg.description && (
-                        <div className="text-gray-500 truncate">{seg.description}</div>
-                      )}
-                    </div>
-                  </button>
-                  {isSelected && !isEditing && <span className="shrink-0" style={{ color: '#FFB800' }}>Playing</span>}
-                  {!isEditing && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); openReanalyze(seg) }}
-                      className="shrink-0 p-1 rounded hover:bg-[#484848] text-gray-500 hover:text-gray-300 transition-colors"
-                      title="Diagnose a missed detection in this recording"
-                    >
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                          d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
-                      </svg>
-                    </button>
-                  )}
-                  {!isEditing && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); startEditingDesc(seg) }}
-                      className="shrink-0 p-1 rounded hover:bg-[#484848] text-gray-500 hover:text-gray-300 transition-colors"
-                      title={seg.description ? 'Edit description' : 'Add description'}
-                    >
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                          d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                    </button>
-                  )}
-                  {isEditing && (
-                    <div className="flex-1 flex items-center gap-1.5 min-w-0" onClick={e => e.stopPropagation()}>
-                      <input
-                        autoFocus
-                        value={descDraft}
-                        onChange={e => setDescDraft(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') saveDesc(seg.id); if (e.key === 'Escape') cancelEditingDesc() }}
-                        maxLength={500}
-                        placeholder="What's in this recording?"
-                        className="flex-1 min-w-0 bg-[#1A1A1A] border border-[#484848] rounded px-2 py-1 text-xs text-white focus:outline-none"
-                      />
-                      <button
-                        onClick={() => saveDesc(seg.id)}
-                        disabled={savingDesc}
-                        className="shrink-0 px-2 py-1 rounded text-xs font-medium disabled:opacity-40"
-                        style={{ background: '#FFB800', color: '#151925' }}
-                      >Save</button>
-                      <button
-                        onClick={cancelEditingDesc}
-                        className="shrink-0 px-2 py-1 rounded text-xs text-gray-400 hover:text-gray-200"
-                      >Cancel</button>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </Card>
-
-      {reanalyzeSeg && reanalyzeUrl && (
-        <ReanalyzeModal segmentId={reanalyzeSeg.id} videoUrl={reanalyzeUrl} onClose={closeReanalyze} />
-      )}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-
-export default function CameraDetail() {
-  const { cameraId } = useParams()
-  const [searchParams, setSearchParams] = useSearchParams()
-  const rawTab = searchParams.get('tab')
-  const tab = TABS.some(t => t.key === rawTab) ? rawTab : 'continuous'
-
-  const [cam, setCam] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [notFound, setNotFound] = useState(false)
-  const [name, setName] = useState('')
-  const [editingName, setEditingName] = useState(false)
-  const [status, setStatus] = useState({ connected: false, reloading: false, fps: 0 })
-
-  // Playback state lives here, not inside ContinuousTab, so the single shared
-  // <video>/live view at the top of the page can show either the live feed or
-  // a selected recording — otherwise the two would need their own separate
-  // players.
-  const [selectedSegment, setSelectedSegment] = useState(null)
-  const [playbackError, setPlaybackError] = useState(false)
-  const [lockBusy, setLockBusy] = useState(false)
-  const [deleteBusy, setDeleteBusy] = useState(false)
-  const [actionError, setActionError] = useState('')
-  const [nav, setNav] = useState({ hasNext: false, hasPrev: false })
-  const videoCardRef = useRef(null)
-  const selectedSegmentRef = useRef(null)
-  useEffect(() => { selectedSegmentRef.current = selectedSegment }, [selectedSegment])
-  // ContinuousTab owns the segment list (day-scoped), so it's the one that
-  // knows what "next"/"prev" mean — it keeps these pointed at the right
-  // functions, and `nav` (above) mirrors just enough of that (booleans + the
-  // next id) to drive the button bar and auto-advance here.
-  const advanceRef = useRef(null)
-  const prevRef = useRef(null)
-  // ContinuousTab also reacts to lock/delete through this, so its own
-  // day-scoped list and Locked Recordings list stay in sync no matter which
-  // component actually issued the request.
-  const syncRef = useRef(null)
-  const handlePlaybackEnded = useCallback(() => { advanceRef.current?.() }, [])
-
-  // Streamed directly via <video src> (token in the query string — see
-  // withToken in api/client.js), not fetched as a blob — the browser handles
-  // buffering/range requests/seeking natively, so there's no fetch to await,
-  // no prefetch-ahead-of-time to manage, and no object URL lifecycle to track.
-  const videoUrl = selectedSegment ? detectionsApi.continuousStreamUrl(selectedSegment.id) : null
-
-  const reload = useCallback(() => {
-    return cameras.list().then(r => {
-      const found = r.data.find(c => c.id === Number(cameraId))
-      if (!found) { setNotFound(true); return }
-      setNotFound(false)
-      setCam(found)
-      setName(found.name || '')
-    }).catch(() => setNotFound(true))
-  }, [cameraId])
-
-  useEffect(() => { reload().finally(() => setLoading(false)) }, [reload])
-
-  const goLive = useCallback(() => {
-    setSelectedSegment(null)
-    setPlaybackError(false)
-  }, [])
-
-  // This component doesn't remount across /cameras/:id navigation (same route,
-  // just a changed param), so playback state from the previous camera has to
-  // be explicitly cleared rather than relying on fresh initial state.
-  useEffect(() => { goLive() }, [cameraId, goLive])
-
-  const selectSegment = useCallback((seg, { scrollIntoView = true } = {}) => {
-    setSelectedSegment(seg)
-    setPlaybackError(false)
-    // Skip this for auto-advance (video ended naturally) — the user is
-    // already looking at the player, so yanking scroll position back to it
-    // every ~5 minutes as segments roll over would just be annoying. Explicit
-    // selections (timeline, locked list, Next/Prev) still snap to it.
-    if (scrollIntoView) videoCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [])
-
-  const toggleLock = useCallback(async () => {
-    const seg = selectedSegment
-    if (!seg) return
-    setLockBusy(true)
-    setActionError('')
-    const next = !seg.locked
-    try {
-      await detectionsApi.lockContinuous(seg.id, next)
-      // Only apply if still the active selection — the user may have picked
-      // something else while this request was in flight.
-      if (selectedSegmentRef.current?.id === seg.id) {
-        setSelectedSegment(prev => prev ? { ...prev, locked: next } : prev)
-      }
-      syncRef.current?.onLockChanged(seg.id, next)
-    } catch {
-      setActionError('Failed to update lock.')
-    } finally {
-      setLockBusy(false)
-    }
-  }, [selectedSegment])
-
-  const deleteSegment = useCallback(async () => {
-    const seg = selectedSegment
-    if (!seg) return
-    const msg = seg.locked
-      ? 'This recording is locked. Delete it anyway?'
-      : 'Delete this recording?'
-    if (!window.confirm(msg)) return
-    setDeleteBusy(true)
-    setActionError('')
-    try {
-      await detectionsApi.deleteContinuous(seg.id)
-      syncRef.current?.onDeleted(seg.id)
-      if (selectedSegmentRef.current?.id === seg.id) goLive()
-    } catch {
-      setActionError('Failed to delete recording.')
-    } finally {
-      setDeleteBusy(false)
-    }
-  }, [selectedSegment, goLive])
-
-  const downloadSegment = () => {
-    if (!videoUrl || !selectedSegment) return
-    const a = document.createElement('a')
-    a.href = videoUrl
-    a.download = `continuous-cam${cam?.id}-${selectedSegment.id}.mp4`
-    a.click()
-  }
-
-  const saveName = async () => {
-    setEditingName(false)
-    const trimmed = name.trim()
-    if (cam && trimmed !== cam.name) {
-      await cameras.setName(cam.id, trimmed).catch(() => {})
-      setCam(prev => ({ ...prev, name: trimmed }))
-    }
-  }
 
   if (loading) return <div className="text-gray-500 text-sm">Loading camera...</div>
   if (notFound || !cam) return (
@@ -1081,6 +903,7 @@ export default function CameraDetail() {
               (hidden categories, debug mode, night mode, overlay) would carry over
               from whichever camera was previously shown. */}
           <CameraLiveView
+            ref={liveViewRef}
             key={cam.id}
             cam={cam}
             onEnabledChange={reload}
@@ -1093,13 +916,13 @@ export default function CameraDetail() {
         </Card>
       </div>
 
-      {/* Right under the video, not below the timeline — this is the whole
-          point of lifting it up here: it needs to be usable while actually
-          watching, not scrolled out of view. Shown regardless of which tab
-          is active, since the player above behaves the same way. */}
-      {selectedSegment && (
-        <Card>
-          <div className="flex items-center justify-between flex-wrap gap-2">
+      {/* Right under the video, and always visible regardless of which tab is
+          active — the whole point of living here instead of inside a
+          tab-scoped panel is that it needs to be usable while actually
+          watching or looking for something, not tucked behind a tab click. */}
+      <Card>
+        {selectedSegment && (
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-4 pb-4 border-b border-[#3A3A3A]">
             <div className="flex items-center gap-2">
               <p className="text-sm text-white font-medium">{formatDateTime(selectedSegment.started_at)}</p>
               {selectedSegment.locked && (
@@ -1111,7 +934,7 @@ export default function CameraDetail() {
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => prevRef.current?.()}
-                disabled={!nav.hasPrev}
+                disabled={!prevSegment}
                 title="Previous recording"
                 className="text-xs px-2.5 py-1 rounded transition-colors hover:opacity-80 disabled:opacity-30"
                 style={{ background: '#3A3A3A', color: '#9CA3AF' }}
@@ -1120,7 +943,7 @@ export default function CameraDetail() {
               </button>
               <button
                 onClick={() => advanceRef.current?.()}
-                disabled={!nav.hasNext}
+                disabled={!nextSegment}
                 title="Next recording"
                 className="text-xs px-2.5 py-1 rounded transition-colors hover:opacity-80 disabled:opacity-30"
                 style={{ background: '#3A3A3A', color: '#9CA3AF' }}
@@ -1153,9 +976,91 @@ export default function CameraDetail() {
               </button>
             </div>
           </div>
-          {actionError && <p className="text-xs text-red-400 mt-2">{actionError}</p>}
-        </Card>
-      )}
+        )}
+        {actionError && <p className="text-xs text-red-400 mb-3">{actionError}</p>}
+
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setDateStr(d => shiftDay(d, -1))}
+              disabled={atOldest}
+              className="px-2 py-1 rounded text-xs bg-[#3A3A3A] hover:bg-[#484848] text-white disabled:opacity-30 transition-colors"
+            >‹ Prev</button>
+            <span className="text-sm text-white font-medium min-w-[9rem] sm:min-w-[11rem] text-center">{formatDayLabel(dateStr)}</span>
+            <button
+              onClick={() => setDateStr(d => shiftDay(d, 1))}
+              disabled={isToday}
+              className="px-2 py-1 rounded text-xs bg-[#3A3A3A] hover:bg-[#484848] text-white disabled:opacity-30 transition-colors"
+            >Next ›</button>
+            {!isToday && (
+              <button onClick={() => setDateStr(todayStr(tz))} className="text-xs text-gray-500 hover:text-gray-300">
+                Jump to today
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <input
+              type="datetime-local"
+              value={gotoValue}
+              onChange={e => setGotoValue(e.target.value)}
+              className="bg-[#3A3A3A] border border-[#484848] rounded px-2 py-1 text-xs text-white focus:outline-none"
+            />
+            <button
+              onClick={handleGoto}
+              disabled={!gotoValue || gotoLoading}
+              className="px-3 py-1 rounded text-xs font-medium disabled:opacity-40 transition-opacity hover:opacity-90"
+              style={{ background: '#FFB800', color: '#151925' }}
+            >
+              {gotoLoading ? 'Looking…' : 'Go to date/time'}
+            </button>
+          </div>
+        </div>
+        {gotoError && <p className="text-xs text-red-400 mb-2">{gotoError}</p>}
+
+        {dayError && <p className="text-xs text-red-400 mb-2">{dayError}</p>}
+
+        {dayLoading ? (
+          <div className="text-xs text-gray-600 py-8 text-center">Loading…</div>
+        ) : segments.length === 0 ? (
+          <div className="text-xs text-gray-600 py-8 text-center">
+            No recordings for this day. {!summary?.segment_count && 'Enable continuous recording in Settings → Storage if you want them.'}
+          </div>
+        ) : (
+          <div className="relative h-12 bg-[#111] rounded overflow-hidden select-none">
+            {segmentsWithMinutes.map(seg => {
+              const leftPct = (seg.startMin / 1440) * 100
+              const widthPct = (SEGMENT_MINUTES / 1440) * 100
+              const isSelected = selectedSegment?.id === seg.id
+              return (
+                <button
+                  key={seg.id}
+                  onClick={() => selectSegment(seg, { switchTab: true })}
+                  title={formatDateTime(seg.started_at)}
+                  className="absolute top-1 bottom-1 rounded-sm transition-colors"
+                  style={{
+                    left: `${leftPct}%`,
+                    width: `${widthPct}%`,
+                    minWidth: '4px',
+                    background: isSelected ? '#FFB800' : seg.locked ? '#93C5FD' : '#4c6e5d',
+                    outline: isSelected ? '2px solid #FFB800' : 'none',
+                  }}
+                />
+              )
+            })}
+            {isToday && (
+              <div
+                className="absolute top-0 bottom-0 w-0.5 animate-pulse"
+                style={{ left: `${(nowMinutes / 1440) * 100}%`, background: '#F87171' }}
+                title="Now — the current segment isn't finalized yet"
+              />
+            )}
+          </div>
+        )}
+        <div className="flex justify-between text-[10px] text-gray-600 mt-1 px-0.5">
+          <span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span>
+        </div>
+      </Card>
 
       <div className="flex items-center gap-1.5 border-b border-[#3A3A3A] overflow-x-auto">
         {TABS.map(t => (
@@ -1172,23 +1077,119 @@ export default function CameraDetail() {
         ))}
       </div>
 
-      {/* Kept mounted (just hidden) rather than conditionally rendered like the
-          other tabs below — the shared player above keeps playing regardless
-          of which tab is active, and auto-advance needs ContinuousTab's
-          effects (which own `advanceRef`) to keep running in the background,
-          not get torn down the moment the user looks at Zones/Adjust/etc. */}
-      <div className={tab === 'continuous' ? '' : 'hidden'}>
-        <ContinuousTab
-          camId={cam.id}
-          selectedSegment={selectedSegment}
-          onSelectSegment={selectSegment}
-          onGoLive={goLive}
-          onNavChange={setNav}
-          advanceRef={advanceRef}
-          prevRef={prevRef}
-          syncRef={syncRef}
-        />
-      </div>
+      {tab === 'continuous' && (
+        <div className="space-y-4">
+          <Card>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">Retained footage</p>
+                <p className="text-white font-medium">≈{approxDuration} · {summary?.segment_count ?? 0} segments</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">Storage used</p>
+                <p className="text-white font-medium">{formatBytes(summary?.total_bytes)}</p>
+              </div>
+              {summary?.oldest_started_at && (
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">Oldest recording</p>
+                  <p className="text-white font-medium">{formatDateTime(summary.oldest_started_at)}</p>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          <Card>
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Locked Recordings</p>
+            {lockedSegments.length === 0 ? (
+              <p className="text-xs text-gray-600">
+                No locked recordings. Lock a segment above to protect it from auto-purge and keep it here for easy access, regardless of which day it's from.
+              </p>
+            ) : (
+              <div className="space-y-1">
+                {lockedSegments.map(seg => {
+                  const isSelected = selectedSegment?.id === seg.id
+                  const isEditing = editingDescId === seg.id
+                  return (
+                    <div
+                      key={seg.id}
+                      className="w-full flex items-center gap-2 text-xs px-2 py-1.5 rounded transition-colors hover:bg-[#3A3A3A]"
+                      style={isSelected ? { background: 'rgba(255,184,0,0.12)' } : {}}
+                    >
+                      <button
+                        onClick={() => selectSegment(seg)}
+                        className="flex-1 flex items-center gap-1.5 text-gray-300 text-left min-w-0"
+                      >
+                        <svg className="w-3 h-3 shrink-0" fill="none" stroke="#93C5FD" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 10-8 0v4h8z" />
+                        </svg>
+                        <div className="min-w-0">
+                          <div>{formatDateTime(seg.started_at)}</div>
+                          {!isEditing && seg.description && (
+                            <div className="text-gray-500 truncate">{seg.description}</div>
+                          )}
+                        </div>
+                      </button>
+                      {isSelected && !isEditing && <span className="shrink-0" style={{ color: '#FFB800' }}>Playing</span>}
+                      {!isEditing && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); openReanalyze(seg) }}
+                          className="shrink-0 p-1 rounded hover:bg-[#484848] text-gray-500 hover:text-gray-300 transition-colors"
+                          title="Diagnose a missed detection in this recording"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+                          </svg>
+                        </button>
+                      )}
+                      {!isEditing && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); startEditingDesc(seg) }}
+                          className="shrink-0 p-1 rounded hover:bg-[#484848] text-gray-500 hover:text-gray-300 transition-colors"
+                          title={seg.description ? 'Edit description' : 'Add description'}
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </button>
+                      )}
+                      {isEditing && (
+                        <div className="flex-1 flex items-center gap-1.5 min-w-0" onClick={e => e.stopPropagation()}>
+                          <input
+                            autoFocus
+                            value={descDraft}
+                            onChange={e => setDescDraft(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') saveDesc(seg.id); if (e.key === 'Escape') cancelEditingDesc() }}
+                            maxLength={500}
+                            placeholder="What's in this recording?"
+                            className="flex-1 min-w-0 bg-[#1A1A1A] border border-[#484848] rounded px-2 py-1 text-xs text-white focus:outline-none"
+                          />
+                          <button
+                            onClick={() => saveDesc(seg.id)}
+                            disabled={savingDesc}
+                            className="shrink-0 px-2 py-1 rounded text-xs font-medium disabled:opacity-40"
+                            style={{ background: '#FFB800', color: '#151925' }}
+                          >Save</button>
+                          <button
+                            onClick={cancelEditingDesc}
+                            className="shrink-0 px-2 py-1 rounded text-xs text-gray-400 hover:text-gray-200"
+                          >Cancel</button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </Card>
+
+          {reanalyzeSeg && reanalyzeUrl && (
+            <ReanalyzeModal segmentId={reanalyzeSeg.id} videoUrl={reanalyzeUrl} onClose={closeReanalyze} />
+          )}
+        </div>
+      )}
       {tab === 'zones' && <ZoneEditor camId={cam.id} />}
       {tab === 'adjust' && <AdjustPanel camId={cam.id} />}
       {tab === 'face' && <FacePanel cam={cam} onUpdate={patch => setCam(prev => ({ ...prev, ...patch }))} />}

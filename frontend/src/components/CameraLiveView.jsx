@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, forwardRef } from 'react'
 import { cameras } from '../api/client'
 
 export const OVERLAY_CATEGORIES = ['people', 'vehicles', 'animals', 'faces', 'other']
@@ -89,10 +89,23 @@ function DebugPanel({ info }) {
 // only need to happen once. `children` renders into the same button row as
 // the controls below (e.g. navigation links to other panels), so callers can
 // extend the row without this component knowing about them.
-export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, playback, onGoLive, onPlaybackEnded, onPlaybackError, children }) {
+const CameraLiveView = forwardRef(function CameraLiveView(
+  { cam, onEnabledChange, onStatusChange, playback, onGoLive, onPlaybackEnded, onPlaybackError, children }, ref
+) {
   const imgRef = useRef(null)
   const wsRef = useRef(null)
   const lastFrameUrlRef = useRef(null)
+  const playbackVideoRef = useRef(null)
+
+  // Exposed so a caller (e.g. "go to this date/time") can seek the playback
+  // video directly — setting .currentTime before metadata loads is queued by
+  // the browser and honored once it can seek, so this works whether the
+  // target segment is already loaded or was just selected.
+  useImperativeHandle(ref, () => ({
+    seekTo: (seconds) => {
+      if (playbackVideoRef.current) playbackVideoRef.current.currentTime = seconds
+    },
+  }), [])
   const [overlay, setOverlay] = useState(true)
   const [hiddenCategories, setHiddenCategories] = useState(() => {
     try {
@@ -362,6 +375,7 @@ export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, p
               </div>
             ) : (
               <video
+                ref={playbackVideoRef}
                 src={playback.url}
                 controls
                 autoPlay
@@ -429,4 +443,6 @@ export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, p
       {debugMode && <DebugPanel info={debugInfo} />}
     </div>
   )
-}
+})
+
+export default CameraLiveView

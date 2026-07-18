@@ -13,6 +13,7 @@ from models.database import get_db
 from api.routes.auth import require_auth, require_operator, require_auth_flexible
 from config.settings import get_settings
 from storage.manager import get_active_images_dir, get_active_clips_dir
+from detection.continuous_recorder import SEGMENT_DURATION_SECS
 import sqlite3
 
 router = APIRouter()
@@ -411,6 +412,50 @@ def continuous_summary(camera_id: int = Query(...), db: sqlite3.Connection = Dep
         "total_bytes": agg[1] or 0,
         "oldest_started_at": agg[2],
         "newest_started_at": agg[3],
+    }
+
+
+@router.get("/continuous/find")
+def find_continuous_segment(
+    camera_id: int = Query(...),
+    at: str = Query(..., description="Target moment, ISO 8601"),
+    db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth),
+):
+    """Finds the continuous-recording segment covering a specific moment, if one
+    still exists. Segments are fixed 5-minute, non-overlapping, sequential
+    windows per camera, so the right one — if any — is simply the last one that
+    started at or before the target time. A gap bigger than one segment's span
+    means recording wasn't actually running through that moment (camera was
+    off, continuous recording was disabled, or the segment has since been
+    purged) even though an earlier row still exists."""
+    try:
+        target = datetime.fromisoformat(at)
+        if target.tzinfo is None:
+            target = target.replace(tzinfo=timezone.utc)
+        target = target.astimezone(timezone.utc)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="'at' must be ISO 8601")
+
+    row = db.execute(
+        "SELECT id, started_at, locked, description FROM continuous_segments WHERE camera_id=? AND started_at <= ? "
+        "ORDER BY started_at DESC LIMIT 1",
+        (camera_id, target.isoformat())
+    ).fetchone()
+    if not row:
+        return {"found": False}
+
+    started_at = datetime.fromisoformat(row["started_at"])
+    gap = (target - started_at).total_seconds()
+    if gap > SEGMENT_DURATION_SECS + 30:
+        return {"found": False}
+
+    return {
+        "found": True,
+        "segment_id": row["id"],
+        "started_at": row["started_at"],
+        "locked": bool(row["locked"]),
+        "description": row["description"],
+        "offset_seconds": max(0, gap),
     }
 
 

@@ -31,7 +31,7 @@ def format_camera_time_str(cam_name: str, ts_iso: str, tz_name: str = 'UTC') -> 
         tz = timezone.utc
     dt = datetime.fromisoformat(ts_iso).astimezone(tz)
     hour = dt.strftime('%I').lstrip('0') or '12'
-    time_str = dt.strftime(f'%a %b {dt.day}, %Y  {hour}:%M %p %Z')
+    time_str = dt.strftime(f'%a %b {dt.day}, %Y  {hour}:%M:%S %p %Z')
     return f"{cam_name}  -  {time_str}"
 
 

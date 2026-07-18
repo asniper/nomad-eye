@@ -597,10 +597,16 @@ class DetectionPipeline:
     def _convert_to_h264(self, clip_path: str) -> str | None:
         import subprocess, logging
         tmp = clip_path + '.h264tmp.mp4'
+        # x264's default keyint is 250 frames regardless of fps — at this app's
+        # low recording frame rates (5-15 fps) that's a keyframe every 17-50
+        # seconds, so seeking snaps to whichever keyframe is nearest instead of
+        # the requested second. -g <fps> forces one keyframe per second, which
+        # is the finest scrub granularity that makes sense at these frame rates.
+        gop = max(1, round(self._recording_fps))
         try:
             r = subprocess.run(
                 ['ffmpeg', '-i', clip_path, '-c:v', 'libx264', '-preset', 'ultrafast',
-                 '-crf', '28', '-movflags', '+faststart', '-an', '-y', tmp],
+                 '-crf', '28', '-g', str(gop), '-movflags', '+faststart', '-an', '-y', tmp],
                 capture_output=True, timeout=180
             )
             if r.returncode == 0 and Path(tmp).exists() and Path(tmp).stat().st_size > 5000:
