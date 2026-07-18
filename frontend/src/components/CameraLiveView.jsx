@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cameras } from '../api/client'
-import VideoLoadProgress from './VideoLoadProgress'
 
 export const OVERLAY_CATEGORIES = ['people', 'vehicles', 'animals', 'faces', 'other']
 export const CATEGORY_STYLE = {
@@ -90,7 +89,7 @@ function DebugPanel({ info }) {
 // only need to happen once. `children` renders into the same button row as
 // the controls below (e.g. navigation links to other panels), so callers can
 // extend the row without this component knowing about them.
-export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, playback, onGoLive, onPlaybackEnded, children }) {
+export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, playback, onGoLive, onPlaybackEnded, onPlaybackError, children }) {
   const imgRef = useRef(null)
   const wsRef = useRef(null)
   const lastFrameUrlRef = useRef(null)
@@ -357,21 +356,20 @@ export default function CameraLiveView({ cam, onEnabledChange, onStatusChange, p
       <div ref={videoContainerRef} className="group relative bg-black rounded-lg overflow-hidden aspect-video">
         {playback ? (
           <>
-            {playback.loading ? (
-              <VideoLoadProgress progress={playback.progress} fill />
-            ) : playback.url ? (
+            {playback.error ? (
+              <div className="absolute inset-0 flex items-center justify-center text-red-400 text-sm text-center px-4">
+                Failed to load that recording.
+              </div>
+            ) : (
               <video
                 src={playback.url}
                 controls
                 autoPlay
                 playsInline
                 onEnded={onPlaybackEnded}
+                onError={onPlaybackError}
                 className="w-full h-full object-contain"
               />
-            ) : (
-              <div className="absolute inset-0 flex items-center justify-center text-red-400 text-sm text-center px-4">
-                Failed to load that recording.
-              </div>
             )}
             <button
               onClick={onGoLive}

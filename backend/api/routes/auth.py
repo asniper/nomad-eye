@@ -1,6 +1,6 @@
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi import APIRouter, HTTPException, Depends, Header, Query
 from pydantic import BaseModel
 from config.settings import get_settings
 from models.database import get_db
@@ -78,6 +78,20 @@ def require_auth(
 ) -> dict:
     """Any authenticated user, regardless of role."""
     user = validate_session_token(db, _bearer_token(authorization))
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return user
+
+
+def require_auth_flexible(
+    authorization: str = Header(default=''),
+    token: str = Query(default=''),
+    db: sqlite3.Connection = Depends(get_db),
+) -> dict:
+    """Like require_auth, but also accepts the session token via a `token` query
+    param. Needed for plain <video src>/<img src> tags, which can't set a custom
+    Authorization header — same mechanism already used for WebSocket auth."""
+    user = validate_session_token(db, _bearer_token(authorization) or token)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
     return user

@@ -1,10 +1,8 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import Card from '../components/Card'
-import VideoLoadProgress from '../components/VideoLoadProgress'
 import { detections, cameras } from '../api/client'
 import { formatDateTime } from '../utils/dates'
-import { useDownloadProgress } from '../hooks/useDownloadProgress'
 
 const CATEGORY_STYLE = {
   people:   { background: 'rgba(239,68,68,0.15)',   color: '#F87171' },
@@ -142,33 +140,11 @@ function Lightbox({ ids, initialIndex, onClose }) {
 }
 
 function ClipSection({ eventId, onDeleted }) {
-  const [src, setSrc] = useState(null)
   const [clipError, setClipError] = useState(false)
-  const [loading, setLoading] = useState(true)
   const [deletingClip, setDeletingClip] = useState(false)
-  const urlRef = useRef(null)
-  const { progress, onDownloadProgress, reset } = useDownloadProgress()
-
-  useEffect(() => {
-    let active = true
-    reset()
-    detections.clip(eventId, { onDownloadProgress })
-      .then(r => {
-        if (!active) return
-        const url = URL.createObjectURL(r.data)
-        urlRef.current = url
-        setSrc(url)
-      })
-      .catch(() => { if (active) setClipError(true) })
-      .finally(() => { if (active) setLoading(false) })
-    return () => {
-      active = false
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current)
-    }
-  }, [eventId]) // eslint-disable-line react-hooks/exhaustive-deps
+  const src = detections.clipStreamUrl(eventId)
 
   const handleDownload = () => {
-    if (!src) return
     const a = document.createElement('a')
     a.href = src
     a.download = `clip-${eventId}.mp4`
@@ -179,10 +155,7 @@ function ClipSection({ eventId, onDeleted }) {
     if (!window.confirm('Delete the video clip for this event?')) return
     setDeletingClip(true)
     detections.deleteClip(eventId)
-      .then(() => {
-        if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null }
-        onDeleted()
-      })
+      .then(() => onDeleted())
       .catch(() => setDeletingClip(false))
   }
 
@@ -198,15 +171,13 @@ function ClipSection({ eventId, onDeleted }) {
       <div className="flex items-center justify-between mb-3">
         <p className="text-sm text-gray-400 font-medium">Video Clip</p>
         <div className="flex gap-2">
-          {src && (
-            <button
-              onClick={handleDownload}
-              className="text-xs px-2.5 py-1 rounded transition-colors hover:opacity-80"
-              style={{ background: '#3A3A3A', color: '#9CA3AF' }}
-            >
-              Download
-            </button>
-          )}
+          <button
+            onClick={handleDownload}
+            className="text-xs px-2.5 py-1 rounded transition-colors hover:opacity-80"
+            style={{ background: '#3A3A3A', color: '#9CA3AF' }}
+          >
+            Download
+          </button>
           <button
             disabled={deletingClip}
             onClick={handleDelete}
@@ -217,18 +188,15 @@ function ClipSection({ eventId, onDeleted }) {
           </button>
         </div>
       </div>
-      {loading ? (
-        <VideoLoadProgress progress={progress} />
-      ) : (
-        <video
-          src={src}
-          controls
-          autoPlay
-          playsInline
-          className="w-full rounded-lg"
-          style={{ background: '#000' }}
-        />
-      )}
+      <video
+        src={src}
+        controls
+        autoPlay
+        playsInline
+        onError={() => setClipError(true)}
+        className="w-full rounded-lg"
+        style={{ background: '#000' }}
+      />
     </Card>
   )
 }

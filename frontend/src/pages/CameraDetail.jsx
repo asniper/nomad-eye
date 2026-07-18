@@ -6,7 +6,6 @@ import CameraLiveView, { OVERLAY_CATEGORIES, CATEGORY_STYLE, statusBadge } from 
 import ReanalyzeModal from '../components/ReanalyzeModal'
 import { cameras, detections as detectionsApi } from '../api/client'
 import { formatDateTime, getTimezone } from '../utils/dates'
-import { useDownloadProgress } from '../hooks/useDownloadProgress'
 
 const DETECTION_BADGE = {
   people:   { background: 'rgba(239,68,68,0.15)',  color: '#F87171' },
@@ -639,20 +638,15 @@ function ContinuousTab({ camId, selectedSegment, onSelectSegment, onGoLive, onNa
     setSavingDesc(false)
   }
 
-  // Fetches its own blob URL rather than reusing the shared player's — the
+  // Builds its own stream URL rather than reusing the shared player's — the
   // Locked Recordings list can open this for any segment regardless of which
-  // one (if any) is currently selected/playing, and the modal owns its own
-  // video element independent of the main player's prefetch/auto-advance state.
-  const openReanalyze = async (seg) => {
-    try {
-      const r = await detectionsApi.continuousVideo(seg.id)
-      setReanalyzeUrl(URL.createObjectURL(r.data))
-      setReanalyzeSeg(seg)
-    } catch {}
+  // one (if any) is currently selected/playing.
+  const openReanalyze = (seg) => {
+    setReanalyzeUrl(detectionsApi.continuousStreamUrl(seg.id))
+    setReanalyzeSeg(seg)
   }
 
   const closeReanalyze = () => {
-    if (reanalyzeUrl) URL.revokeObjectURL(reanalyzeUrl)
     setReanalyzeUrl(null)
     setReanalyzeSeg(null)
   }
@@ -664,7 +658,7 @@ function ContinuousTab({ camId, selectedSegment, onSelectSegment, onGoLive, onNa
   }, [nextSegment, prevSegment, onSelectSegment, advanceRef, prevRef])
 
   useEffect(() => {
-    onNavChange({ hasNext: !!nextSegment, hasPrev: !!prevSegment, nextSegmentId: nextSegment?.id ?? null })
+    onNavChange({ hasNext: !!nextSegment, hasPrev: !!prevSegment })
   }, [nextSegment, prevSegment, onNavChange])
 
   useEffect(() => {
@@ -931,22 +925,18 @@ export default function CameraDetail() {
   // a selected recording — otherwise the two would need their own separate
   // players.
   const [selectedSegment, setSelectedSegment] = useState(null)
-  const [videoUrl, setVideoUrl] = useState(null)
-  const [videoLoading, setVideoLoading] = useState(false)
-  const { progress: videoProgress, onDownloadProgress: onVideoDownloadProgress, reset: resetVideoProgress } = useDownloadProgress()
+  const [playbackError, setPlaybackError] = useState(false)
   const [lockBusy, setLockBusy] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [actionError, setActionError] = useState('')
-  const [nav, setNav] = useState({ hasNext: false, hasPrev: false, nextSegmentId: null })
-  const videoUrlRef = useRef(null)
-  const selectRequestRef = useRef(0)
+  const [nav, setNav] = useState({ hasNext: false, hasPrev: false })
   const videoCardRef = useRef(null)
   const selectedSegmentRef = useRef(null)
   useEffect(() => { selectedSegmentRef.current = selectedSegment }, [selectedSegment])
   // ContinuousTab owns the segment list (day-scoped), so it's the one that
   // knows what "next"/"prev" mean — it keeps these pointed at the right
   // functions, and `nav` (above) mirrors just enough of that (booleans + the
-  // next id, for prefetching) to drive the button bar and auto-advance here.
+  // next id) to drive the button bar and auto-advance here.
   const advanceRef = useRef(null)
   const prevRef = useRef(null)
   // ContinuousTab also reacts to lock/delete through this, so its own
@@ -955,30 +945,11 @@ export default function CameraDetail() {
   const syncRef = useRef(null)
   const handlePlaybackEnded = useCallback(() => { advanceRef.current?.() }, [])
 
-  // Prefetches the video for whatever segment is currently "next," so
-  // auto-advance and the Next button don't have to wait on a network
-  // round-trip at the exact moment they're used — the whole point of
-  // buffering ahead. Keyed by id, not by object identity, since `nav` is
-  // recomputed (new object) on basically every render.
-  const prefetchRef = useRef({ id: null, promise: null, url: null })
-  useEffect(() => {
-    const id = nav.nextSegmentId
-    const prev = prefetchRef.current
-    if (prev.id === id) return
-    // Guard against revoking a URL that selectSegment has (or is about to)
-    // adopt as the live video. Without this check, turning over from B (once
-    // "next" moves past it) races selectSegment's own consumption of that
-    // same shared promise whenever B's fetch is still in flight at the exact
-    // moment it gets selected — both attach a .then() to the same promise,
-    // and this one otherwise has no way to know the other one just won.
-    if (prev.id != null) prev.promise.then(u => { if (u && u !== videoUrlRef.current) URL.revokeObjectURL(u) }).catch(() => {})
-    if (!id) { prefetchRef.current = { id: null, promise: null, url: null }; return }
-    const entry = { id, promise: null, url: null }
-    entry.promise = detectionsApi.continuousVideo(id)
-      .then(r => { const u = URL.createObjectURL(r.data); entry.url = u; return u })
-      .catch(() => null)
-    prefetchRef.current = entry
-  }, [nav.nextSegmentId])
+  // Streamed directly via <video src> (token in the query string — see
+  // withToken in api/client.js), not fetched as a blob — the browser handles
+  // buffering/range requests/seeking natively, so there's no fetch to await,
+  // no prefetch-ahead-of-time to manage, and no object URL lifecycle to track.
+  const videoUrl = selectedSegment ? detectionsApi.continuousStreamUrl(selectedSegment.id) : null
 
   const reload = useCallback(() => {
     return cameras.list().then(r => {
@@ -993,14 +964,8 @@ export default function CameraDetail() {
   useEffect(() => { reload().finally(() => setLoading(false)) }, [reload])
 
   const goLive = useCallback(() => {
-    // Bump the request counter so an already-in-flight selectSegment fetch
-    // (started before this call) recognizes itself as stale when it resolves,
-    // instead of silently resurrecting a blob URL nothing points to anymore.
-    selectRequestRef.current++
     setSelectedSegment(null)
-    setVideoLoading(false)
-    if (videoUrlRef.current) { URL.revokeObjectURL(videoUrlRef.current); videoUrlRef.current = null }
-    setVideoUrl(null)
+    setPlaybackError(false)
   }, [])
 
   // This component doesn't remount across /cameras/:id navigation (same route,
@@ -1008,48 +973,14 @@ export default function CameraDetail() {
   // be explicitly cleared rather than relying on fresh initial state.
   useEffect(() => { goLive() }, [cameraId, goLive])
 
-  useEffect(() => () => {
-    if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current)
-    if (prefetchRef.current.promise) prefetchRef.current.promise.then(u => { if (u) URL.revokeObjectURL(u) }).catch(() => {})
-  }, [])
-
-  const selectSegment = useCallback(async (seg, { scrollIntoView = true } = {}) => {
+  const selectSegment = useCallback((seg, { scrollIntoView = true } = {}) => {
     setSelectedSegment(seg)
-    setVideoUrl(null)
+    setPlaybackError(false)
     // Skip this for auto-advance (video ended naturally) — the user is
     // already looking at the player, so yanking scroll position back to it
     // every ~5 minutes as segments roll over would just be annoying. Explicit
     // selections (timeline, locked list, Next/Prev) still snap to it.
     if (scrollIntoView) videoCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    const requestId = ++selectRequestRef.current
-
-    // If this is the segment we were already buffering ahead of time (the
-    // common case for auto-advance and Next, since it's queued the moment it
-    // becomes "next"), reuse that instead of firing a second, redundant
-    // request — and skip the loading flash entirely if it already finished.
-    const cached = prefetchRef.current.id === seg.id ? prefetchRef.current : null
-    setVideoLoading(!cached?.url)
-    resetVideoProgress()
-    try {
-      const url = cached ? await cached.promise : await detectionsApi.continuousVideo(seg.id, { onDownloadProgress: onVideoDownloadProgress }).then(r => URL.createObjectURL(r.data))
-      // Clicking a second segment before the first's fetch resolves must not let
-      // the stale response overwrite the newer selection's video. A cached
-      // (prefetched) URL is shared with whichever call actually wins — e.g.
-      // two clicks on the same still-loading segment both await the same
-      // promise — so a losing call must NOT revoke it here; only the fetch it
-      // exclusively owns (the non-cached path) is safe to clean up itself.
-      // The shared one's lifecycle is the prefetch effect's job.
-      if (requestId !== selectRequestRef.current) { if (url && !cached) URL.revokeObjectURL(url); return }
-      if (!url) throw new Error('load failed')
-      if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current)
-      videoUrlRef.current = url
-      setVideoUrl(url)
-      if (cached) prefetchRef.current = { id: null, promise: null, url: null } // consumed
-    } catch {
-      // playback.url stays null — CameraLiveView renders the "failed to load" state
-    } finally {
-      if (requestId === selectRequestRef.current) setVideoLoading(false)
-    }
   }, [])
 
   const toggleLock = useCallback(async () => {
@@ -1154,9 +1085,10 @@ export default function CameraDetail() {
             cam={cam}
             onEnabledChange={reload}
             onStatusChange={setStatus}
-            playback={selectedSegment ? { loading: videoLoading, url: videoUrl, progress: videoProgress, label: formatDateTime(selectedSegment.started_at) } : null}
+            playback={selectedSegment ? { url: videoUrl, error: playbackError, label: formatDateTime(selectedSegment.started_at) } : null}
             onGoLive={goLive}
             onPlaybackEnded={handlePlaybackEnded}
+            onPlaybackError={() => setPlaybackError(true)}
           />
         </Card>
       </div>

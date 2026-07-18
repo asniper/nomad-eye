@@ -88,28 +88,10 @@ function Lightbox({ src, onClose }) {
 }
 
 function ClipPlayer({ eventId, onClose }) {
-  const [src, setSrc] = useState(null)
   const [error, setError] = useState(false)
-  const urlRef = useRef(null)
-
-  useEffect(() => {
-    let active = true
-    detections.clip(eventId)
-      .then(r => {
-        if (!active) return
-        const url = URL.createObjectURL(r.data)
-        urlRef.current = url
-        setSrc(url)
-      })
-      .catch(() => { if (active) setError(true) })
-    return () => {
-      active = false
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current)
-    }
-  }, [eventId])
+  const src = detections.clipStreamUrl(eventId)
 
   const handleDownload = () => {
-    if (!src) return
     const a = document.createElement('a')
     a.href = src
     a.download = `clip-${eventId}.mp4`
@@ -129,22 +111,19 @@ function ClipPlayer({ eventId, onClose }) {
           <div className="h-48 flex items-center justify-center rounded-lg bg-[#1A1A1A] border border-[#3A3A3A]">
             <p className="text-sm text-red-400">Clip not available</p>
           </div>
-        ) : !src ? (
-          <div className="h-48 flex items-center justify-center rounded-lg bg-[#1A1A1A] border border-[#3A3A3A]">
-            <p className="text-sm text-gray-500">Loading clip…</p>
-          </div>
         ) : (
           <video
             src={src}
             controls
             autoPlay
             playsInline
+            onError={() => setError(true)}
             className="w-full rounded-lg"
             style={{ maxHeight: '70vh', background: '#000' }}
           />
         )}
         <div className="flex justify-end gap-2 mt-2">
-          {src && (
+          {!error && (
             <button
               onClick={handleDownload}
               className="px-3 py-1.5 text-xs rounded-md transition-colors hover:opacity-80"

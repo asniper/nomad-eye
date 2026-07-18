@@ -2,6 +2,15 @@ import axios from 'axios'
 
 const api = axios.create({ baseURL: '/api' })
 
+// For plain <video src>/<img src> tags, which can't set an Authorization header —
+// the session token travels as a query param instead, same mechanism the camera
+// WebSocket stream already uses. Only for read-only media GETs, never for anything
+// that mutates state.
+function withToken(path) {
+  const token = localStorage.getItem('nomadeye_auth') || ''
+  return `${path}?token=${encodeURIComponent(token)}`
+}
+
 api.interceptors.request.use(cfg => {
   const token = localStorage.getItem('nomadeye_auth')
   if (token) cfg.headers['Authorization'] = `Bearer ${token}`
@@ -72,7 +81,7 @@ export const detections = {
   storage: () => api.get('/detections/storage'),
   purge: (category, images_only) => api.delete('/detections/purge', { data: { category, images_only } }),
   deleteEvent: (event_id) => api.delete(`/detections/events/${event_id}`),
-  clip: (event_id, config) => api.get(`/detections/events/${event_id}/clip`, { responseType: 'blob', ...config }),
+  clipStreamUrl: (event_id) => withToken(`/api/detections/events/${event_id}/clip`),
   deleteClip: (event_id) => api.delete(`/detections/events/${event_id}/clip`),
   clipsStorage: () => api.get('/detections/clips/storage'),
   purgeClips: () => api.delete('/detections/clips'),
@@ -83,7 +92,7 @@ export const detections = {
     api.get('/detections/continuous/summary', { params: { camera_id: cameraId } }),
   listLockedContinuous: (cameraId) =>
     api.get('/detections/continuous/locked', { params: { camera_id: cameraId } }),
-  continuousVideo: (segmentId, config) => api.get(`/detections/continuous/${segmentId}/video`, { responseType: 'blob', ...config }),
+  continuousStreamUrl: (segmentId) => withToken(`/api/detections/continuous/${segmentId}/video`),
   deleteContinuous: (segmentId) => api.delete(`/detections/continuous/${segmentId}`),
   lockContinuous: (segmentId, locked) => api.post(`/detections/continuous/${segmentId}/lock`, { locked }),
   setContinuousDescription: (segmentId, description) => api.patch(`/detections/continuous/${segmentId}/description`, { description }),

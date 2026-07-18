@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from models.database import get_db
-from api.routes.auth import require_auth, require_operator
+from api.routes.auth import require_auth, require_operator, require_auth_flexible
 from config.settings import get_settings
 from storage.manager import get_active_images_dir, get_active_clips_dir
 import sqlite3
@@ -304,7 +304,7 @@ def purge_all_clips(db: sqlite3.Connection = Depends(get_db), _=Depends(require_
 
 
 @router.get("/events/{event_id}/clip")
-def get_clip(event_id: str, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def get_clip(event_id: str, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth_flexible)):
     row = db.execute(
         "SELECT clip_path FROM event_clips WHERE event_id = ?", (event_id,)
     ).fetchone()
@@ -506,7 +506,7 @@ def reanalyze_continuous_segment(segment_id: int, body: ReanalyzeBody, _=Depends
 
 
 @router.get("/continuous/{segment_id}/video")
-def get_continuous_video(segment_id: int, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth)):
+def get_continuous_video(segment_id: int, db: sqlite3.Connection = Depends(get_db), _=Depends(require_auth_flexible)):
     row = db.execute("SELECT path FROM continuous_segments WHERE id=?", (segment_id,)).fetchone()
     if not row or not row["path"]:
         raise HTTPException(status_code=404, detail="Segment not found")
