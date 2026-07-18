@@ -363,6 +363,45 @@ def get_continuous_storage(db: sqlite3.Connection = Depends(get_db), _=Depends(r
     return {"segment_count": agg[0] or 0, "segment_bytes": agg[1] or 0}
 
 
+@router.delete("/continuous/purge")
+def purge_continuous_unlocked(db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
+    """Deletes every unlocked continuous-recording segment. Locked segments are
+    never touched here — that's the whole point of locking one — see
+    /continuous/purge-locked for the separate, deliberate override."""
+    rows = db.execute("SELECT id, path FROM continuous_segments WHERE locked=0").fetchall()
+    db.execute("DELETE FROM continuous_segments WHERE locked=0")
+    db.commit()
+    deleted = 0
+    for row in rows:
+        if row["path"]:
+            try:
+                os.remove(row["path"])
+                deleted += 1
+            except OSError:
+                pass
+    return {"deleted_segments": deleted}
+
+
+@router.delete("/continuous/purge-locked")
+def purge_continuous_locked(db: sqlite3.Connection = Depends(get_db), _=Depends(require_operator)):
+    """Deletes ONLY locked continuous-recording segments — a deliberate
+    override of the protection locking is meant to provide. Separate from
+    purge_continuous_unlocked on purpose so the two can never be triggered by
+    the same accidental click."""
+    rows = db.execute("SELECT id, path FROM continuous_segments WHERE locked=1").fetchall()
+    db.execute("DELETE FROM continuous_segments WHERE locked=1")
+    db.commit()
+    deleted = 0
+    for row in rows:
+        if row["path"]:
+            try:
+                os.remove(row["path"])
+                deleted += 1
+            except OSError:
+                pass
+    return {"deleted_segments": deleted}
+
+
 @router.get("/continuous")
 def list_continuous_segments(
     camera_id: int = Query(...),

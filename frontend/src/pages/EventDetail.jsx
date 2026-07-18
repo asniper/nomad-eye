@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import Card from '../components/Card'
 import { detections, cameras } from '../api/client'
 import { formatDateTime } from '../utils/dates'
+import { useConfirm } from '../context/ConfirmContext'
 
 const CATEGORY_STYLE = {
   people:   { background: 'rgba(239,68,68,0.15)',   color: '#F87171' },
@@ -140,6 +141,7 @@ function Lightbox({ ids, initialIndex, onClose }) {
 }
 
 function ClipSection({ eventId, onDeleted }) {
+  const confirm = useConfirm()
   const [clipError, setClipError] = useState(false)
   const [deletingClip, setDeletingClip] = useState(false)
   const src = detections.clipStreamUrl(eventId)
@@ -151,8 +153,8 @@ function ClipSection({ eventId, onDeleted }) {
     a.click()
   }
 
-  const handleDelete = () => {
-    if (!window.confirm('Delete the video clip for this event?')) return
+  const handleDelete = async () => {
+    if (!(await confirm('Delete the video clip for this event?'))) return
     setDeletingClip(true)
     detections.deleteClip(eventId)
       .then(() => onDeleted())
@@ -202,6 +204,7 @@ function ClipSection({ eventId, onDeleted }) {
 }
 
 export default function EventDetail() {
+  const confirm = useConfirm()
   const { eventId } = useParams()
   const navigate = useNavigate()
   const [event, setEvent] = useState(null)
@@ -254,8 +257,8 @@ export default function EventDetail() {
         <div className="ml-auto">
           <button
             disabled={deleting}
-            onClick={() => {
-              if (!window.confirm('Delete this event and all its images?')) return
+            onClick={async () => {
+              if (!(await confirm('Delete this event and all its images?'))) return
               setDeleting(true)
               detections.deleteEvent(eventId)
                 .then(() => navigate('/detections'))

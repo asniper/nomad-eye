@@ -6,6 +6,7 @@ import { settings, detections as detectionsApi, storage as storageApi, system as
 
 import { useAuth } from '../hooks/useAuth'
 import { useDeviceStatus } from '../context/DeviceStatusContext'
+import { useConfirm } from '../context/ConfirmContext'
 import { setTimezone } from '../utils/dates'
 import Network from './Network'
 
@@ -312,6 +313,7 @@ export default function Settings() {
 const STATUS_OPTIONS_PRESENCE = ['home', 'away', 'sleep', 'vacation']
 
 function PresenceCard({ allSettings, saveSetting, saving, saved }) {
+  const confirm = useConfirm()
   const [devices, setDevices] = useState([])
   const [addingDevice, setAddingDevice] = useState(false)
   const [newName, setNewName] = useState('')
@@ -352,9 +354,10 @@ function PresenceCard({ allSettings, saveSetting, saving, saved }) {
     setAddSaving(false)
   }
 
-  const handleDelete = async (id) => {
-    setDeletingId(id)
-    await presenceApi.deleteDevice(id).catch(() => {})
+  const handleDelete = async (device) => {
+    if (!(await confirm(`Stop watching "${device.name}" for presence detection?`))) return
+    setDeletingId(device.id)
+    await presenceApi.deleteDevice(device.id).catch(() => {})
     loadDevices()
     setDeletingId(null)
   }
@@ -486,7 +489,7 @@ function PresenceCard({ allSettings, saveSetting, saving, saved }) {
                     </span>
                   )}
                   <button
-                    onClick={() => handleDelete(d.id)}
+                    onClick={() => handleDelete(d)}
                     disabled={deletingId === d.id}
                     className="text-xs text-red-400 hover:text-red-300 transition-colors shrink-0 disabled:opacity-50"
                   >
@@ -607,8 +610,8 @@ function PresenceCard({ allSettings, saveSetting, saving, saved }) {
 }
 
 function CamerasCard({ allSettings, saveSetting, saving, saved }) {
+  const confirm = useConfirm()
   const [cams, setCams] = useState(null)
-  const [confirm, setConfirm] = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [togglingEnabled, setTogglingEnabled] = useState(null)
 
@@ -618,15 +621,18 @@ function CamerasCard({ allSettings, saveSetting, saving, saved }) {
 
   useEffect(() => { load() }, [load])
 
-  const handleDelete = async (id) => {
-    if (confirm !== id) { setConfirm(id); return }
-    setDeleting(id)
+  const handleDelete = async (cam) => {
+    if (!(await confirm({
+      title: `Delete "${cam.name || `Camera ${cam.id}`}"?`,
+      message: `Permanently deletes this camera and all ${cam.event_count} of its detection event${cam.event_count !== 1 ? 's' : ''}. This cannot be undone.`,
+      confirmLabel: 'Delete permanently',
+    }))) return
+    setDeleting(cam.id)
     try {
-      await camerasApi.deletePermanent(id)
+      await camerasApi.deletePermanent(cam.id)
       load()
     } catch {}
     setDeleting(null)
-    setConfirm(null)
   }
 
   if (!cams) return null
@@ -638,7 +644,6 @@ function CamerasCard({ allSettings, saveSetting, saving, saved }) {
       <div className="space-y-0">
         {cams.map(cam => {
           const isOffline = !cam.alive
-          const isConfirming = confirm === cam.id
           const isDeleting = deleting === cam.id
           return (
             <div key={cam.id} className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 py-3 border-b border-[#3A3A3A] last:border-0">
@@ -687,30 +692,14 @@ function CamerasCard({ allSettings, saveSetting, saving, saved }) {
 
                 {/* Delete (offline only) */}
                 {isOffline && (
-                  isConfirming ? (
-                    <>
-                      <span className="text-xs text-gray-400">Delete {cam.event_count} event{cam.event_count !== 1 ? 's' : ''}?</span>
-                      <button
-                        onClick={() => handleDelete(cam.id)}
-                        disabled={isDeleting}
-                        className="px-3 py-1 text-xs rounded-md transition-colors disabled:opacity-50"
-                        style={{ background: '#EF4444', color: '#fff' }}
-                      >
-                        {isDeleting ? 'Deleting…' : 'Confirm Delete'}
-                      </button>
-                      <button onClick={() => setConfirm(null)} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => handleDelete(cam.id)}
-                      className="px-3 py-1 text-xs rounded-md transition-colors"
-                      style={{ background: '#3A3A3A', color: '#F87171' }}
-                    >
-                      Delete
-                    </button>
-                  )
+                  <button
+                    onClick={() => handleDelete(cam)}
+                    disabled={isDeleting}
+                    className="px-3 py-1 text-xs rounded-md transition-colors disabled:opacity-50"
+                    style={{ background: '#3A3A3A', color: '#F87171' }}
+                  >
+                    {isDeleting ? 'Deleting…' : 'Delete'}
+                  </button>
                 )}
               </div>
             </div>
@@ -803,6 +792,7 @@ function UsersTab() {
 }
 
 function UsersCard() {
+  const confirm = useConfirm()
   const { user: me } = useAuth()
   const [users, setUsers] = useState(null)
   const [error, setError] = useState('')
@@ -810,7 +800,6 @@ function UsersCard() {
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'viewer' })
   const [resetTarget, setResetTarget] = useState(null)
   const [resetPassword, setResetPassword] = useState('')
-  const [confirmDelete, setConfirmDelete] = useState(null)
 
   const load = useCallback(() => {
     authApi.users.list().then(r => setUsers(r.data)).catch(() => setUsers([]))
@@ -859,10 +848,12 @@ function UsersCard() {
   }
 
   const handleDelete = async (u) => {
-    if (confirmDelete !== u.id) { setConfirmDelete(u.id); return }
+    if (!(await confirm({
+      title: `Delete user "${u.username}"?`,
+      message: 'They will be logged out immediately and can no longer sign in.',
+    }))) return
     try {
       await authApi.users.remove(u.id)
-      setConfirmDelete(null)
       load()
     } catch (e) {
       setError(e?.response?.data?.detail || 'Failed to delete user.')
@@ -905,12 +896,9 @@ function UsersCard() {
                 disabled={isSelf}
                 title={isSelf ? "Can't delete your own account while logged in as it" : undefined}
                 className="px-3 py-1.5 rounded-md text-xs font-medium transition-colors disabled:opacity-40"
-                style={confirmDelete === u.id
-                  ? { background: '#EF4444', color: '#ffffff' }
-                  : { background: '#3A3A3A', color: '#ffffff' }
-                }
+                style={{ background: '#3A3A3A', color: '#ffffff' }}
               >
-                {confirmDelete === u.id ? 'Confirm delete' : 'Delete'}
+                Delete
               </button>
             </div>
           )
@@ -1209,6 +1197,7 @@ function UnknownFaceTile({ face, knownNames, onUpdate }) {
 }
 
 function FaceManageModal({ group, knownNames, onClose, onUpdate }) {
+  const confirm = useConfirm()
   const [assigningId, setAssigningId] = useState(null)
   const [assignMode, setAssignMode] = useState('select') // 'select' | 'new'
   const [newName, setNewName] = useState('')
@@ -1233,12 +1222,19 @@ function FaceManageModal({ group, knownNames, onClose, onUpdate }) {
   }
 
   const handleDelete = async (faceId) => {
+    if (!(await confirm('Delete this face sample?'))) return
     setDeletingId(faceId)
     try { await facesApi.delete(faceId); onUpdate() } catch {}
     setDeletingId(null)
   }
 
   const handleDisassociate = async (faceId) => {
+    if (!(await confirm({
+      title: 'Remove this sample from the group?',
+      message: 'It moves back to Unknown — you can reassign it later.',
+      danger: false,
+      confirmLabel: 'Remove',
+    }))) return
     try { await facesApi.disassociate(faceId); onUpdate() } catch {}
   }
 
@@ -1256,7 +1252,7 @@ function FaceManageModal({ group, knownNames, onClose, onUpdate }) {
   }
 
   const handleClearAll = async () => {
-    if (!confirm(`Delete all ${group.faces.length} samples for "${group.name}"?`)) return
+    if (!(await confirm(`Delete all ${group.faces.length} samples for "${group.name}"?`))) return
     setClearingAll(true)
     try {
       if (isUnknown) {
@@ -1518,10 +1514,14 @@ function RecordingQualityCard({ refreshKey = 0 }) {
 }
 
 function ContinuousRecordingCard({ refreshKey = 0 }) {
+  const confirm = useConfirm()
   const [s, setS] = useState(null)
   const [storage, setStorage] = useState(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [purgingUnlocked, setPurgingUnlocked] = useState(false)
+  const [purgingLocked, setPurgingLocked] = useState(false)
+  const [purgeResult, setPurgeResult] = useState(null)
 
   const load = useCallback(() => {
     settings.getAll().then(r => setS(r.data)).catch(() => {})
@@ -1542,6 +1542,38 @@ function ContinuousRecordingCard({ refreshKey = 0 }) {
       setTimeout(() => setSaved(false), 2000)
     } catch {}
     setSaving(false)
+  }
+
+  const handlePurgeUnlocked = async () => {
+    if (!(await confirm({
+      title: 'Purge continuous recordings?',
+      message: "Deletes every continuous-recording segment that isn't locked. Locked recordings are never touched by this.",
+      confirmLabel: 'Delete unlocked recordings',
+    }))) return
+    setPurgingUnlocked(true)
+    setPurgeResult(null)
+    try {
+      const r = await detectionsApi.purgeContinuousUnlocked()
+      setPurgeResult(`${r.data.deleted_segments} unlocked recording${r.data.deleted_segments !== 1 ? 's' : ''} deleted.`)
+      load()
+    } catch {}
+    setPurgingUnlocked(false)
+  }
+
+  const handlePurgeLocked = async () => {
+    if (!(await confirm({
+      title: 'Purge LOCKED recordings?',
+      message: 'This deletes only the recordings you deliberately locked to protect them from auto-purge. Unlocked recordings are not touched by this — use the other button for those. This cannot be undone.',
+      confirmLabel: 'Delete locked recordings',
+    }))) return
+    setPurgingLocked(true)
+    setPurgeResult(null)
+    try {
+      const r = await detectionsApi.purgeContinuousLocked()
+      setPurgeResult(`${r.data.deleted_segments} locked recording${r.data.deleted_segments !== 1 ? 's' : ''} deleted.`)
+      load()
+    } catch {}
+    setPurgingLocked(false)
   }
 
   return (
@@ -1577,17 +1609,39 @@ function ContinuousRecordingCard({ refreshKey = 0 }) {
           {storage.segment_count} segment{storage.segment_count === 1 ? '' : 's'} stored, {fmtBytes(storage.segment_bytes)} total.
         </p>
       )}
+
+      {purgeResult && <p className="text-xs text-green-400 pt-2">{purgeResult}</p>}
+
+      <div className="flex items-center gap-2 flex-wrap pt-3">
+        <button
+          onClick={handlePurgeUnlocked}
+          disabled={purgingUnlocked}
+          className="px-4 py-1.5 rounded-md text-sm font-medium transition-colors disabled:opacity-50"
+          style={{ background: '#3A3A3A', color: '#fff' }}
+        >
+          {purgingUnlocked ? 'Purging…' : 'Purge unlocked recordings'}
+        </button>
+        <button
+          onClick={handlePurgeLocked}
+          disabled={purgingLocked}
+          className="px-4 py-1.5 rounded-md text-sm font-medium transition-colors disabled:opacity-50"
+          style={{ background: '#3A3A3A', color: '#EF4444' }}
+          title="Deletes only the recordings you locked — a deliberate override of that protection"
+        >
+          {purgingLocked ? 'Purging…' : 'Purge locked recordings'}
+        </button>
+      </div>
     </Card>
   )
 }
 
 function VideoClipsCard({ refreshKey = 0 }) {
+  const confirm = useConfirm()
   const [s, setS] = useState(null)
   const [clipStorage, setClipStorage] = useState(null)
   const [saving, setSaving] = useState({})
   const [saved, setSaved] = useState({})
   const [purging, setPurging] = useState(false)
-  const [purgeConfirm, setPurgeConfirm] = useState(false)
   const [purgeResult, setPurgeResult] = useState(null)
 
   const load = useCallback(() => {
@@ -1609,9 +1663,12 @@ function VideoClipsCard({ refreshKey = 0 }) {
   }
 
   const handlePurgeClips = async () => {
-    if (!purgeConfirm) { setPurgeConfirm(true); return }
+    if (!(await confirm({
+      title: 'Purge all event clips?',
+      message: "Deletes every detection-event video clip. This doesn't touch continuous recording — that has its own purge buttons below.",
+      confirmLabel: 'Delete all event clips',
+    }))) return
     setPurging(true)
-    setPurgeConfirm(false)
     setPurgeResult(null)
     try {
       const r = await detectionsApi.purgeClips()
@@ -1780,18 +1837,10 @@ function VideoClipsCard({ refreshKey = 0 }) {
               onClick={handlePurgeClips}
               disabled={purging || (clipStorage && clipStorage.clip_count === 0)}
               className="px-4 py-1.5 rounded-md text-sm font-medium transition-colors disabled:opacity-50"
-              style={purgeConfirm
-                ? { background: '#EF4444', color: '#fff' }
-                : { background: '#3A3A3A', color: '#fff' }
-              }
+              style={{ background: '#3A3A3A', color: '#fff' }}
             >
-              {purging ? 'Purging…' : purgeConfirm ? 'Confirm — delete all clips?' : 'Purge all clips'}
+              {purging ? 'Purging…' : 'Purge all event clips'}
             </button>
-            {purgeConfirm && (
-              <button onClick={() => setPurgeConfirm(false)} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
-                Cancel
-              </button>
-            )}
           </div>
         </div>
       </div>
@@ -2333,11 +2382,11 @@ function StorageLocationCard() {
 }
 
 function ExternalDevicesCard({ onDeviceChanged }) {
+  const confirm = useConfirm()
   const [devices, setDevices] = useState([])
   const [primary, setPrimary] = useState(null)
   const [clipsPrimary, setClipsPrimary] = useState(null)
   const [pending, setPending] = useState({})
-  const [confirm, setConfirm] = useState(null)
   const [error, setError] = useState(null)
   const [scanning, setScanning] = useState(false)
 
@@ -2369,7 +2418,11 @@ function ExternalDevicesCard({ onDeviceChanged }) {
       setError(e.response?.data?.detail || `${label} failed`)
     }
     setPending(p => ({ ...p, [`${device}-${action}`]: false }))
-    setConfirm(null)
+  }
+
+  const confirmAndAct = async (device, action, label, confirmOpts) => {
+    if (!(await confirm(confirmOpts))) return
+    act(device, action, label)
   }
 
   const scan = async () => {
@@ -2453,7 +2506,12 @@ function ExternalDevicesCard({ onDeviceChanged }) {
                   )}
                   {mounted && (
                     <button
-                      onClick={() => act(dev.name, 'unmount', 'Eject')}
+                      onClick={() => confirmAndAct(dev.name, 'unmount', 'Eject', {
+                        title: `Eject /dev/${dev.name}?`,
+                        message: (isPrimary || isClipsPrimary) ? "This device is currently in use for storage — recording will stop until another drive is set." : undefined,
+                        danger: false,
+                        confirmLabel: 'Eject',
+                      })}
                       disabled={!!pending[`${dev.name}-unmount`]}
                       className="px-3 py-1 text-xs rounded-md disabled:opacity-50 transition-colors"
                       style={{ background: '#3A3A3A', color: '#9CA3AF' }}
@@ -2461,27 +2519,18 @@ function ExternalDevicesCard({ onDeviceChanged }) {
                       {pending[`${dev.name}-unmount`] ? 'Ejecting…' : 'Eject'}
                     </button>
                   )}
-                  {confirm === dev.name ? (
-                    <>
-                      <button
-                        onClick={() => act(dev.name, 'format', 'Format')}
-                        disabled={!!pending[`${dev.name}-format`]}
-                        className="px-3 py-1 text-xs rounded-md disabled:opacity-50 transition-colors"
-                        style={{ background: '#EF4444', color: '#fff' }}
-                      >
-                        {pending[`${dev.name}-format`] ? 'Formatting…' : 'Confirm Format'}
-                      </button>
-                      <button onClick={() => setConfirm(null)} className="text-xs text-gray-500 hover:text-gray-300">Cancel</button>
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => setConfirm(dev.name)}
-                      className="px-3 py-1 text-xs rounded-md transition-colors"
-                      style={{ background: '#3A3A3A', color: '#F87171' }}
-                    >
-                      Format
-                    </button>
-                  )}
+                  <button
+                    onClick={() => confirmAndAct(dev.name, 'format', 'Format', {
+                      title: `Format /dev/${dev.name}?`,
+                      message: 'Permanently erases everything on this device. This cannot be undone.',
+                      confirmLabel: 'Erase and format',
+                    })}
+                    disabled={!!pending[`${dev.name}-format`]}
+                    className="px-3 py-1 text-xs rounded-md disabled:opacity-50 transition-colors"
+                    style={{ background: '#3A3A3A', color: '#F87171' }}
+                  >
+                    {pending[`${dev.name}-format`] ? 'Formatting…' : 'Format'}
+                  </button>
                 </div>
               </div>
             )
@@ -2509,10 +2558,10 @@ function fmtBytes(b) {
 }
 
 function StorageCard() {
+  const confirm = useConfirm()
   const [storage, setStorage] = useState(null)
   const [purgeCategory, setPurgeCategory] = useState('all')
   const [imagesOnly, setImagesOnly] = useState(false)
-  const [confirm, setConfirm] = useState(false)
   const [purging, setPurging] = useState(false)
   const [result, setResult] = useState(null)
 
@@ -2523,9 +2572,14 @@ function StorageCard() {
   useEffect(() => { load() }, [load])
 
   const handlePurge = async () => {
-    if (!confirm) { setConfirm(true); return }
+    if (!(await confirm({
+      title: `Purge ${purgeCategory === 'all' ? 'all' : purgeCategory} detections?`,
+      message: imagesOnly
+        ? 'Deletes the saved images for these detections but keeps the records.'
+        : 'Permanently deletes these detection records and their images. This cannot be undone.',
+      confirmLabel: 'Delete',
+    }))) return
     setPurging(true)
-    setConfirm(false)
     setResult(null)
     try {
       const r = await detectionsApi.purge(purgeCategory, imagesOnly)
@@ -2600,7 +2654,7 @@ function StorageCard() {
             {PURGE_CATEGORIES.map(c => (
               <button
                 key={c}
-                onClick={() => { setPurgeCategory(c); setConfirm(false); setResult(null) }}
+                onClick={() => { setPurgeCategory(c); setResult(null) }}
                 className="px-2.5 py-1 rounded-md text-xs font-medium capitalize transition-opacity hover:opacity-80"
                 style={purgeCategory === c
                   ? { background: '#FFB800', color: '#151925' }
@@ -2615,7 +2669,7 @@ function StorageCard() {
           <div
             className="relative flex-shrink-0 rounded-full transition-colors duration-200"
             style={{ width: 36, height: 20, background: imagesOnly ? '#FFB800' : '#484848' }}
-            onClick={() => { setImagesOnly(v => !v); setConfirm(false) }}
+            onClick={() => setImagesOnly(v => !v)}
           >
             <div
               className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all duration-200"
@@ -2636,18 +2690,10 @@ function StorageCard() {
             onClick={handlePurge}
             disabled={purging}
             className="px-4 py-1.5 rounded-md text-sm font-medium transition-colors disabled:opacity-50"
-            style={confirm
-              ? { background: '#EF4444', color: '#ffffff' }
-              : { background: '#3A3A3A', color: '#ffffff' }
-            }
+            style={{ background: '#3A3A3A', color: '#ffffff' }}
           >
-            {purging ? 'Purging…' : confirm ? 'Confirm — this cannot be undone' : 'Purge'}
+            {purging ? 'Purging…' : 'Purge'}
           </button>
-          {confirm && (
-            <button onClick={() => setConfirm(false)} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
-              Cancel
-            </button>
-          )}
         </div>
       </div>
     </Card>

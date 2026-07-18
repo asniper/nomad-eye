@@ -146,9 +146,13 @@ function ZoneEditor({ camId }) {
     }
   }
 
-  const removeZone = async (zoneId) => {
+  const removeZone = async (zone) => {
+    if (!(await confirm({
+      title: 'Delete this zone?',
+      message: `${zone.zone_type === 'exclude' ? 'Ignore' : 'Only'}${zone.name ? ` "${zone.name}"` : ''} zone will no longer apply to detection.`,
+    }))) return
     try {
-      await cameras.deleteZone(camId, zoneId)
+      await cameras.deleteZone(camId, zone.id)
       load()
     } catch {}
   }
@@ -256,7 +260,7 @@ function ZoneEditor({ camId }) {
               <span className="min-w-0 break-words" style={{ color: ZONE_STROKE[z.zone_type] }}>
                 {z.zone_type === 'exclude' ? 'Ignore' : 'Only'}{z.name ? ` "${z.name}"` : ''} — {z.categories ? z.categories.join(', ') : 'all categories'}
               </span>
-              <button onClick={() => removeZone(z.id)} className="text-gray-500 hover:text-red-400 shrink-0">Delete</button>
+              <button onClick={() => removeZone(z)} className="text-gray-500 hover:text-red-400 shrink-0">Delete</button>
             </div>
           ))}
         </div>
@@ -564,6 +568,7 @@ const SEGMENT_MINUTES = 5
 // ---------------------------------------------------------------------------
 
 export default function CameraDetail() {
+  const confirm = useConfirm()
   const { cameraId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const rawTab = searchParams.get('tab')
@@ -711,10 +716,10 @@ export default function CameraDetail() {
   const deleteSegment = useCallback(async () => {
     const seg = selectedSegment
     if (!seg) return
-    const msg = seg.locked
-      ? 'This recording is locked. Delete it anyway?'
-      : 'Delete this recording?'
-    if (!window.confirm(msg)) return
+    if (!(await confirm({
+      title: seg.locked ? 'This recording is locked. Delete it anyway?' : 'Delete this recording?',
+      message: formatDateTime(seg.started_at),
+    }))) return
     setDeleteBusy(true)
     setActionError('')
     try {

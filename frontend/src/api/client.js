@@ -86,6 +86,8 @@ export const detections = {
   clipsStorage: () => api.get('/detections/clips/storage'),
   purgeClips: () => api.delete('/detections/clips'),
   continuousStorage: () => api.get('/detections/continuous/storage'),
+  purgeContinuousUnlocked: () => api.delete('/detections/continuous/purge'),
+  purgeContinuousLocked: () => api.delete('/detections/continuous/purge-locked'),
   listContinuous: (cameraId, date, tz) =>
     api.get('/detections/continuous', { params: { camera_id: cameraId, date, tz } }),
   continuousSummary: (cameraId) =>

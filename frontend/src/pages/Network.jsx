@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import { network, settings as settingsApi } from '../api/client'
+import { useConfirm } from '../context/ConfirmContext'
 
 const WIFI_ICON = (
   <svg className="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -38,6 +39,7 @@ function CopyButton({ text, label = 'Copy', copiedLabel = 'Copied!' }) {
 }
 
 function TailscaleCard() {
+  const confirm = useConfirm()
   const [ts, setTs] = useState(null)
   const [settingUrl, setSettingUrl] = useState(false)
   const [urlSet, setUrlSet] = useState(false)
@@ -120,7 +122,7 @@ function TailscaleCard() {
   }
 
   const logout = async () => {
-    if (!window.confirm('Log out of Tailscale? You will need to re-authorize this device.')) return
+    if (!(await confirm('Log out of Tailscale? You will need to re-authorize this device.'))) return
     setLoggingOut(true); setActionError(null)
     try {
       await network.tailscaleLogout()
@@ -450,6 +452,7 @@ function ExternalAccessCard() {
 }
 
 export default function Network() {
+  const confirm = useConfirm()
   const [netStatus, setNetStatus] = useState(null)
   const [known, setKnown] = useState([])
   const [scanResults, setScanResults] = useState([])
@@ -653,7 +656,7 @@ export default function Network() {
                   }
                   <button
                     onClick={async () => {
-                      if (!confirm(`Remove "${n.ssid}" from saved networks?`)) return
+                      if (!(await confirm(`Remove "${n.ssid}" from saved networks?`))) return
                       try {
                         await network.deleteKnown(n.ssid)
                         setKnown(k => k.filter(x => x.ssid !== n.ssid))

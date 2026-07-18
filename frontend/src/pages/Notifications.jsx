@@ -5,6 +5,7 @@ import NotificationSettings from '../components/NotificationSettings'
 import { useAuth } from '../hooks/useAuth'
 import { notifications, settings as settingsApi } from '../api/client'
 import { formatDateTime } from '../utils/dates'
+import { useConfirm } from '../context/ConfirmContext'
 
 const CATEGORIES = ['people', 'vehicles', 'animals', 'faces', 'other']
 const STATUSES = ['home', 'away', 'sleep', 'vacation']
@@ -286,6 +287,7 @@ function RuleForm({ contacts, onSave, onCancel, initialValues, onUpdate }) {
 }
 
 function NotificationLog() {
+  const confirm = useConfirm()
   const [log, setLog] = useState([])
   const [loading, setLoading] = useState(true)
   const [clearing, setClearing] = useState(false)
@@ -301,6 +303,7 @@ function NotificationLog() {
   useEffect(() => { load() }, [load])
 
   const clearLog = async () => {
+    if (!(await confirm({ title: 'Clear notification log?', message: 'Deletes the entire sent-notification history.' }))) return
     setClearing(true)
     await notifications.clearLog().catch(() => {})
     setLog([])
@@ -363,6 +366,7 @@ function NotificationLog() {
 }
 
 export default function Notifications() {
+  const confirm = useConfirm()
   const { user } = useAuth()
   const isAdmin = (user?.role ?? 'viewer') === 'admin'
   const [contacts, setContacts] = useState([])
@@ -399,9 +403,10 @@ export default function Notifications() {
     setAddingRule(false)
   }
 
-  const deleteContact = async (id) => {
-    setContacts(prev => prev.filter(c => c.id !== id))
-    await notifications.deleteContact(id).catch(() => reload())
+  const deleteContact = async (contact) => {
+    if (!(await confirm(`Remove contact "${contact.name}"? Notification rules referencing it will stop notifying anyone.`))) return
+    setContacts(prev => prev.filter(c => c.id !== contact.id))
+    await notifications.deleteContact(contact.id).catch(() => reload())
   }
 
   const toggleContact = async (id, active) => {
@@ -422,6 +427,7 @@ export default function Notifications() {
   }
 
   const deleteRule = async (id) => {
+    if (!(await confirm('Delete this notification rule?'))) return
     setRules(prev => prev.filter(r => r.id !== id))
     await notifications.deleteRule(id).catch(() => reload())
   }
@@ -509,7 +515,7 @@ export default function Notifications() {
                             : 'Test'}
                         </button>
                         <button
-                          onClick={() => deleteContact(c.id)}
+                          onClick={() => deleteContact(c)}
                           className="text-xs text-red-400 hover:text-red-300 transition-colors"
                         >
                           Remove

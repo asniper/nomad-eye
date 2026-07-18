@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import Card from '../components/Card'
 import { detections, cameras, settings as settingsApi } from '../api/client'
 import { formatDateTime, formatTime } from '../utils/dates'
+import { useConfirm } from '../context/ConfirmContext'
 
 function fmtBytes(b) {
   if (!b) return '0 B'
@@ -146,6 +147,7 @@ function ClipPlayer({ eventId, onClose }) {
 }
 
 function EventRow({ ev, cameraNames, onDelete }) {
+  const confirm = useConfirm()
   const [expanded, setExpanded] = useState(false)
   const [lightbox, setLightbox] = useState(null)
   const [clipOpen, setClipOpen] = useState(false)
@@ -213,8 +215,8 @@ function EventRow({ ev, cameraNames, onDelete }) {
               )}
               <button
                 disabled={deleting}
-                onClick={() => {
-                  if (!window.confirm('Delete this event and all its images?')) return
+                onClick={async () => {
+                  if (!(await confirm('Delete this event and all its images?'))) return
                   setDeleting(true)
                   detections.deleteEvent(ev.event_id)
                     .then(() => onDelete(ev.event_id))
@@ -248,6 +250,7 @@ function EventRow({ ev, cameraNames, onDelete }) {
 }
 
 export default function Detections() {
+  const confirm = useConfirm()
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [cameraNames, setCameraNames] = useState({})
@@ -260,7 +263,6 @@ export default function Detections() {
   const [clipsEnabled, setClipsEnabled] = useState(false)
   const [clipStorage, setClipStorage] = useState(null)
   const [purgingClips, setPurgingClips] = useState(false)
-  const [purgeClipConfirm, setPurgeClipConfirm] = useState(false)
 
   const load = useCallback((p) => {
     setLoading(true)
@@ -289,9 +291,12 @@ export default function Detections() {
   }, [])
 
   const handlePurgeClips = async () => {
-    if (!purgeClipConfirm) { setPurgeClipConfirm(true); return }
+    if (!(await confirm({
+      title: 'Purge all event clips?',
+      message: "Deletes every detection-event video clip. This doesn't touch continuous recording.",
+      confirmLabel: 'Delete all event clips',
+    }))) return
     setPurgingClips(true)
-    setPurgeClipConfirm(false)
     try {
       await detections.purgeClips()
       detections.clipsStorage().then(r => setClipStorage(r.data)).catch(() => {})
@@ -315,18 +320,10 @@ export default function Detections() {
               onClick={handlePurgeClips}
               disabled={purgingClips}
               className="px-3 py-1 text-xs rounded-md transition-colors disabled:opacity-50"
-              style={purgeClipConfirm
-                ? { background: '#EF4444', color: '#fff' }
-                : { background: '#3A3A3A', color: '#9CA3AF' }
-              }
+              style={{ background: '#3A3A3A', color: '#9CA3AF' }}
             >
-              {purgingClips ? 'Purging…' : purgeClipConfirm ? 'Confirm purge all clips?' : 'Purge clips'}
+              {purgingClips ? 'Purging…' : 'Purge all event clips'}
             </button>
-            {purgeClipConfirm && (
-              <button onClick={() => setPurgeClipConfirm(false)} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
-                Cancel
-              </button>
-            )}
           </div>
         )}
       </div>
